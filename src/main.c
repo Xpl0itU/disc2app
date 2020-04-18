@@ -155,7 +155,7 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "disc2app v1.0 (based on wudump and wud2app by FIX94)";
+static const char *hdrStr = "disc2app controller mod v1 (based on wudump and wud2app by FIX94)";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
