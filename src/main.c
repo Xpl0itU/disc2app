@@ -16,6 +16,7 @@
 #include "dynamic_libs/os_functions.h"
 #include "dynamic_libs/sys_functions.h"
 #include "dynamic_libs/vpad_functions.h"
+#include "dynamic_libs/padscore_functions.h"
 #include "system/memory.h"
 #include "common/common.h"
 #include "main.h"
@@ -166,6 +167,8 @@ int Menu_Main(void)
 	InitSysFunctionPointers();
 	InitVPadFunctionPointers();
 	VPADInit();
+	InitPadScoreFunctionPointers();
+	KPADInit();
 	memoryInitialize();
 
 	// Init screen
@@ -191,7 +194,13 @@ int Menu_Main(void)
 
 	int vpadError = -1;
 	VPADData vpad;
+	KPADData kpad;
+
+    // set everything to 0 because some vars will stay uninitialized on first read
+    memset(&kpad, 0, sizeof(kpad));
+
 	int action = 0;
+	bool exitMainLoop = false;
 	while(1)
 	{
 		VPADRead(0, &vpad, 1, &vpadError);
@@ -211,6 +220,69 @@ int Menu_Main(void)
 				break;
 			}
 		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			uint32_t controllerType;
+			// check if the controller is connected
+			if (WPADProbe(i, &controllerType) != 0)
+				continue;
+
+			KPADRead(i, &kpad, 1);
+
+			switch (controllerType)
+			{
+			case WPAD_EXT_CORE:
+				if((kpad.btns_h | kpad.btns_d) & WPAD_BUTTON_HOME)
+				{
+					MEMBucket_free(screenBuffer);
+					memoryRelease();
+					return EXIT_SUCCESS;
+				}
+				else if((kpad.btns_d | kpad.btns_h) & WPAD_BUTTON_A)
+					exitMainLoop = true;
+				else if((kpad.btns_d | kpad.btns_h) & WPAD_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+				}
+				break;
+			case WPAD_EXT_CLASSIC:
+				if((kpad.classic.btns_h | kpad.classic.btns_d) & WPAD_CLASSIC_BUTTON_HOME)
+				{
+					MEMBucket_free(screenBuffer);
+					memoryRelease();
+					return EXIT_SUCCESS;
+				}
+				else if((kpad.classic.btns_d | kpad.classic.btns_h) & WPAD_CLASSIC_BUTTON_A)
+					exitMainLoop = true;
+				else if((kpad.classic.btns_d | kpad.classic.btns_h) & WPAD_CLASSIC_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+				}
+				break;
+			case WPAD_EXT_PRO_CONTROLLER:
+				if((kpad.pro.btns_h | kpad.pro.btns_d) & WPAD_PRO_BUTTON_HOME)
+				{
+					MEMBucket_free(screenBuffer);
+					memoryRelease();
+					return EXIT_SUCCESS;
+				}
+				else if((kpad.pro.btns_d | kpad.pro.btns_h) & WPAD_PRO_BUTTON_A)
+					exitMainLoop = true;
+				else if((kpad.pro.btns_d | kpad.pro.btns_h) & WPAD_PRO_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+				}
+				break;
+			}
+		}
+
+		if (exitMainLoop)
+			break;
+
 		usleep(50000);
 	}
 	int j;
@@ -268,6 +340,32 @@ int Menu_Main(void)
 		{
 			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
 				goto prgEnd;
+		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			uint32_t controllerType;
+			// check if the controller is connected
+			if (WPADProbe(i, &controllerType) != 0)
+				continue;
+
+			KPADRead(i, &kpad, 1);
+
+			switch (controllerType)
+			{
+			case WPAD_EXT_CORE:
+				if((kpad.btns_h | kpad.btns_d) & WPAD_BUTTON_HOME)
+					goto prgEnd;
+				break;
+			case WPAD_EXT_CLASSIC:
+				if((kpad.classic.btns_h | kpad.classic.btns_d) & WPAD_CLASSIC_BUTTON_HOME)
+					goto prgEnd;
+				break;
+			case WPAD_EXT_PRO_CONTROLLER:
+				if((kpad.pro.btns_h | kpad.pro.btns_d) & WPAD_PRO_BUTTON_HOME)
+					goto prgEnd;
+				break;
+			}
 		}
 		usleep(50000);
 	}

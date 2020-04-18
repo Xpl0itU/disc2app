@@ -34,6 +34,16 @@ extern unsigned int padscore_handle;
 
 #include <gctypes.h>
 
+#define WPAD_EXT_CORE           0
+#define WPAD_EXT_NUNCHUK        1
+#define WPAD_EXT_CLASSIC        2
+#define WPAD_EXT_MPLUS          5
+#define WPAD_EXT_MPLUS_NUNCHUK  6
+#define WPAD_EXT_MPLUS_CLASSIC  7
+#define WPAD_EXT_PRO_CONTROLLER 31
+
+#define WPAD_FMT_PRO_CONTROLLER 22
+
 #define WPAD_BUTTON_LEFT                    0x0001
 #define WPAD_BUTTON_RIGHT                   0x0002
 #define WPAD_BUTTON_DOWN                    0x0004
