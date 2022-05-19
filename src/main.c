@@ -5,6 +5,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <string.h>
+#include <stdlib.h>
 #include <malloc.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -13,13 +14,17 @@
 #include <polarssl/md5.h>
 #include <polarssl/sha1.h>
 #include <iosuhax.h>
-#include "dynamic_libs/os_functions.h"
-#include "dynamic_libs/sys_functions.h"
-#include "dynamic_libs/vpad_functions.h"
-#include "dynamic_libs/padscore_functions.h"
-#include "system/memory.h"
+#include <malloc.h>
+#include <coreinit/screen.h>
+#include <coreinit/mcp.h>
+#include <padscore/kpad.h>
+#include <vpad/input.h>
+#include <coreinit/cache.h>
+#include <coreinit/ios.h>
+#include <coreinit/thread.h>
+#include <coreinit/energysaver.h>
+#include <sysapp/launch.h>
 #include "common/common.h"
-#include "main.h"
 #include "exploit.h"
 #include "../payload/wupserver_bin.h"
 #include "rijndael.h"
@@ -27,6 +32,7 @@
 #include "tmd.h"
 #include "structs.h"
 
+void OSForceFullRelaunch(void);
 #define ALIGN_FORWARD(x, alignment) (((x) + ((alignment)-1)) & (~((alignment)-1)))
 
 //just to be able to call async
@@ -64,8 +70,8 @@ void MCPHookClose()
 
 void println_noflip(int line, const char *msg)
 {
-	OSScreenPutFontEx(0,0,line,msg);
-	OSScreenPutFontEx(1,0,line,msg);
+	OSScreenPutFontEx(SCREEN_TV,0,line,msg);
+	OSScreenPutFontEx(SCREEN_DRC,0,line,msg);
 }
 
 void println(int line, const char *msg)
@@ -74,8 +80,8 @@ void println(int line, const char *msg)
 	for(i = 0; i < 2; i++)
 	{	//double-buffered font write
 		println_noflip(line,msg);
-		OSScreenFlipBuffersEx(0);
-		OSScreenFlipBuffersEx(1);
+		OSScreenFlipBuffersEx(SCREEN_TV);
+		OSScreenFlipBuffersEx(SCREEN_DRC);
 	}
 }
 
@@ -142,11 +148,11 @@ static void fsa_odd_seek(uint64_t offset)
 int fsa_write(int fsa_fd, int fd, void *buf, int len)
 {
 	int done = 0;
-	uint8_t *buf_u8 = (uint8_t*)buf;
+	uint8_t *buf_uint8_t = (uint8_t*)buf;
 	while(done < len)
 	{
 		size_t write_size = len - done;
-		int result = IOSUHAX_FSA_WriteFile(fsa_fd, buf_u8 + done, 0x01, write_size, fd, 0);
+		int result = IOSUHAX_FSA_WriteFile(fsa_fd, buf_uint8_t + done, 0x01, write_size, fd, 0);
 		if(result < 0)
 			return result;
 		else
@@ -155,33 +161,29 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "disc2app controller mod v1 (based on wudump and wud2app by FIX94)";
+static const char *hdrStr = "disc2app WUT Port (based on wudump and wud2app by FIX94)";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
 }
 
-int Menu_Main(void)
+int main()
 {
-	InitOSFunctionPointers();
-	InitSysFunctionPointers();
-	InitVPadFunctionPointers();
 	VPADInit();
-	InitPadScoreFunctionPointers();
 	KPADInit();
-	memoryInitialize();
 
 	// Init screen
 	OSScreenInit();
-	int screen_buf0_size = OSScreenGetBufferSizeEx(0);
-	int screen_buf1_size = OSScreenGetBufferSizeEx(1);
-	uint8_t *screenBuffer = (uint8_t*)MEMBucket_alloc(screen_buf0_size+screen_buf1_size, 0x100);
-	OSScreenSetBufferEx(0, screenBuffer);
-	OSScreenSetBufferEx(1, (screenBuffer + screen_buf0_size));
-	OSScreenEnableEx(0, 1);
-	OSScreenEnableEx(1, 1);
-	OSScreenClearBufferEx(0, 0);
-	OSScreenClearBufferEx(1, 0);
+	size_t tvBufferSize = OSScreenGetBufferSizeEx(SCREEN_TV);
+    size_t drcBufferSize = OSScreenGetBufferSizeEx(SCREEN_DRC);
+    void* tvBuffer = memalign(0x100, tvBufferSize);
+    void* drcBuffer = memalign(0x100, drcBufferSize);
+	OSScreenSetBufferEx(SCREEN_TV, tvBuffer);
+    OSScreenSetBufferEx(SCREEN_DRC, drcBuffer);
+    OSScreenEnableEx(SCREEN_TV, true);
+    OSScreenEnableEx(SCREEN_DRC, true);
+	OSScreenClearBufferEx(SCREEN_TV, 0);
+	OSScreenClearBufferEx(SCREEN_DRC, 0);
 
 	printhdr_noflip();
 	println_noflip(2,"Please make sure to take out any currently inserted disc.");
@@ -189,12 +191,12 @@ int Menu_Main(void)
 	println_noflip(4,"Press A to continue with a FAT32 SD Card as destination.");
 	println_noflip(5,"Press B to continue with a FAT32 USB Device as destination.");
 	println_noflip(6,"Press HOME to return to the Homebrew Launcher.");
-	OSScreenFlipBuffersEx(0);
-	OSScreenFlipBuffersEx(1);
+	OSScreenFlipBuffersEx(SCREEN_TV);
+	OSScreenFlipBuffersEx(SCREEN_DRC);
 
 	int vpadError = -1;
-	VPADData vpad;
-	KPADData kpad;
+	VPADStatus vpad;
+	KPADStatus kpad;
 
     // set everything to 0 because some vars will stay uninitialized on first read
     memset(&kpad, 0, sizeof(kpad));
@@ -206,15 +208,15 @@ int Menu_Main(void)
 		VPADRead(0, &vpad, 1, &vpadError);
 		if(vpadError == 0)
 		{
-			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
+			if(vpad.trigger & VPAD_BUTTON_HOME)
 			{
-				MEMBucket_free(screenBuffer);
-				memoryRelease();
+				if (tvBuffer) free(tvBuffer);
+    			if (drcBuffer) free(drcBuffer);
 				return EXIT_SUCCESS;
 			}
-			else if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_A)
+			else if(vpad.trigger & VPAD_BUTTON_A)
 				break;
-			else if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_B)
+			else if(vpad.trigger & VPAD_BUTTON_B)
 			{
 				action = 1;
 				break;
@@ -233,45 +235,45 @@ int Menu_Main(void)
 			switch (controllerType)
 			{
 			case WPAD_EXT_CORE:
-				if((kpad.btns_h | kpad.btns_d) & WPAD_BUTTON_HOME)
+				if(kpad.trigger & WPAD_BUTTON_HOME)
 				{
-					MEMBucket_free(screenBuffer);
-					memoryRelease();
+					if (tvBuffer) free(tvBuffer);
+    				if (drcBuffer) free(drcBuffer);
 					return EXIT_SUCCESS;
 				}
-				else if((kpad.btns_d | kpad.btns_h) & WPAD_BUTTON_A)
+				else if(kpad.trigger & WPAD_BUTTON_A)
 					exitMainLoop = true;
-				else if((kpad.btns_d | kpad.btns_h) & WPAD_BUTTON_B)
+				else if(kpad.trigger & WPAD_BUTTON_B)
 				{
 					action = 1;
 					exitMainLoop = true;
 				}
 				break;
 			case WPAD_EXT_CLASSIC:
-				if((kpad.classic.btns_h | kpad.classic.btns_d) & WPAD_CLASSIC_BUTTON_HOME)
+				if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
 				{
-					MEMBucket_free(screenBuffer);
-					memoryRelease();
+					if (tvBuffer) free(tvBuffer);
+    				if (drcBuffer) free(drcBuffer);
 					return EXIT_SUCCESS;
 				}
-				else if((kpad.classic.btns_d | kpad.classic.btns_h) & WPAD_CLASSIC_BUTTON_A)
+				else if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_A)
 					exitMainLoop = true;
-				else if((kpad.classic.btns_d | kpad.classic.btns_h) & WPAD_CLASSIC_BUTTON_B)
+				else if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_B)
 				{
 					action = 1;
 					exitMainLoop = true;
 				}
 				break;
 			case WPAD_EXT_PRO_CONTROLLER:
-				if((kpad.pro.btns_h | kpad.pro.btns_d) & WPAD_PRO_BUTTON_HOME)
+				if(kpad.pro.trigger & WPAD_PRO_BUTTON_HOME)
 				{
-					MEMBucket_free(screenBuffer);
-					memoryRelease();
+					if (tvBuffer) free(tvBuffer);
+    				if (drcBuffer) free(drcBuffer);
 					return EXIT_SUCCESS;
 				}
-				else if((kpad.pro.btns_d | kpad.pro.btns_h) & WPAD_PRO_BUTTON_A)
+				else if(kpad.pro.trigger & WPAD_PRO_BUTTON_A)
 					exitMainLoop = true;
-				else if((kpad.pro.btns_d | kpad.pro.btns_h) & WPAD_PRO_BUTTON_B)
+				else if(kpad.pro.trigger & WPAD_PRO_BUTTON_B)
 				{
 					action = 1;
 					exitMainLoop = true;
@@ -288,11 +290,11 @@ int Menu_Main(void)
 	int j;
 	for(j = 0; j < 2; j++)
 	{
-		OSScreenClearBufferEx(0, 0);
-		OSScreenClearBufferEx(1, 0);
+		OSScreenClearBufferEx(SCREEN_TV, 0);
+		OSScreenClearBufferEx(SCREEN_DRC, 0);
 		printhdr_noflip();
-		OSScreenFlipBuffersEx(0);
-		OSScreenFlipBuffersEx(1);
+		OSScreenFlipBuffersEx(SCREEN_TV);
+		OSScreenFlipBuffersEx(SCREEN_DRC);
 		usleep(25000);
 	}
 	int line = 2;
@@ -326,7 +328,8 @@ int Menu_Main(void)
 		println(line++,"FSA could not be opened!");
 		goto prgEnd;
 	}
-	fatInitDefault();
+	fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
+	fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
 
 	println(line++,"Please insert the disc you want to dump now to begin.");
 	//wait for disc key to be written
@@ -338,7 +341,7 @@ int Menu_Main(void)
 		VPADRead(0, &vpad, 1, &vpadError);
 		if(vpadError == 0)
 		{
-			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
+			if(vpad.trigger & VPAD_BUTTON_HOME)
 				goto prgEnd;
 		}
 
@@ -354,15 +357,15 @@ int Menu_Main(void)
 			switch (controllerType)
 			{
 			case WPAD_EXT_CORE:
-				if((kpad.btns_h | kpad.btns_d) & WPAD_BUTTON_HOME)
+				if(kpad.trigger & WPAD_BUTTON_HOME)
 					goto prgEnd;
 				break;
 			case WPAD_EXT_CLASSIC:
-				if((kpad.classic.btns_h | kpad.classic.btns_d) & WPAD_CLASSIC_BUTTON_HOME)
+				if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
 					goto prgEnd;
 				break;
 			case WPAD_EXT_PRO_CONTROLLER:
-				if((kpad.pro.btns_h | kpad.pro.btns_d) & WPAD_PRO_BUTTON_HOME)
+				if(kpad.pro.trigger & WPAD_PRO_BUTTON_HOME)
 					goto prgEnd;
 				break;
 			}
@@ -408,11 +411,11 @@ int Menu_Main(void)
 	mkdir(outDir, 0x600);
 
 	// Read common key
-	u8 cKey[0x10];
+	uint8_t cKey[0x10];
 	memcpy(cKey, (void*)0xF5E104E0, 0x10);
 
 	// Read disc key
-	u8 discKey[0x10];
+	uint8_t discKey[0x10];
 	memcpy(discKey, (void*)0xF5E10C00, 0x10);
 
 	int apd_enabled = 0;
@@ -427,15 +430,15 @@ int Menu_Main(void)
 
 	println(line++, "Reading Disc FST from WUD");
 	//read out and decrypt partition table
-	uint8_t *partTblEnc = MEMBucket_alloc(0x8000, 0x100);
+	uint8_t *partTblEnc = aligned_alloc(0x100, 0x8000);
 	fsa_odd_seek(0x18000);
 	fsa_odd_read(fsaFd, oddFd, partTblEnc, 0x8000, 1);
 	uint8_t iv[16];
 	memset(iv,0,16);
 	aes_set_key(discKey);
-	uint8_t *partTbl = MEMBucket_alloc(0x8000, 0x100);
+	uint8_t *partTbl = aligned_alloc(0x100, 0x8000);
 	aes_decrypt(iv,partTblEnc,partTbl,0x8000);
-	MEMBucket_free(partTblEnc);
+	free(partTblEnc);
 
 	if(*(uint32_t*)partTbl != 0xCCA6E67B)
 	{
@@ -487,14 +490,14 @@ int Menu_Main(void)
 	offset += 0x8000;
 	//read out FST
 	println(line++,"Reading SI FST from WUD");
-	void *fstEnc = MEMBucket_alloc(0x8000, 0x100);
+	void *fstEnc = aligned_alloc(0x100, 0x8000);
 	fsa_odd_seek(offset);
 	fsa_odd_read(fsaFd, oddFd, fstEnc, 0x8000, 1);
-	void *fstDec = MEMBucket_alloc(0x8000, 0x100);
+	void *fstDec = aligned_alloc(0x100, 0x8000);
 	memset(iv, 0, 16);
 	aes_set_key(discKey);
 	aes_decrypt(iv, fstEnc, fstDec, 0x8000);
-	MEMBucket_free(fstEnc);
+	free(fstEnc);
 	uint32_t EntryCount = (*(uint32_t*)(fstDec + 8) << 5);
 	uint32_t Entries = *(uint32_t*)(fstDec + 0x20 + EntryCount + 8);
 	uint32_t NameOff = 0x20 + EntryCount + (Entries << 4);
@@ -514,15 +517,15 @@ int Menu_Main(void)
 		uint32_t CNTSize = fe[entry].FileLength;
 		uint64_t CNTOff = ((uint64_t)fe[entry].FileOffset) << 5;
 		uint64_t CNT_IV = CNTOff >> 16;
-		void *titleF = MEMBucket_alloc(ALIGN_FORWARD(CNTSize,16), 0x100);
+		void *titleF = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize,16));
 		fsa_odd_seek(offset + CNTOff);
 		fsa_odd_read(fsaFd, oddFd, titleF, ALIGN_FORWARD(CNTSize,16), 1);
-		uint8_t *titleDec = MEMBucket_alloc(ALIGN_FORWARD(CNTSize,16), 0x100);
+		uint8_t *titleDec = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize,16));
 		memset(iv,0,16);
 		memcpy(iv + 8, &CNT_IV, 8);
 		aes_set_key(discKey);
 		aes_decrypt(iv,titleF,titleDec,ALIGN_FORWARD(CNTSize,16));
-		MEMBucket_free(titleF);
+		free(titleF);
 		char outF[64];
 		sprintf(outF,"%s/%s",outDir,name);
 		//just write the first found cert, they're all the same anyways
@@ -578,15 +581,15 @@ int Menu_Main(void)
 				fwrite(titleDec, 1, CNTSize, t);
 				fclose(t);
 				tmdFound = true;
-				tmdBuf = MEMBucket_alloc(CNTSize, 0x100);
+				tmdBuf = aligned_alloc(0x100, CNTSize);
 				memcpy(tmdBuf, titleDec, CNTSize);
 			}
 		}
-		MEMBucket_free(titleDec);
+		free(titleDec);
 	}
-	OSScreenClearBufferEx(0, 0);
-	OSScreenClearBufferEx(1, 0);
-	MEMBucket_free(fstDec);
+	OSScreenClearBufferEx(SCREEN_TV, 0);
+	OSScreenClearBufferEx(SCREEN_DRC, 0);
+	free(fstDec);
 
 	if(!tikFound || !tmdFound)
 	{
@@ -601,7 +604,7 @@ int Menu_Main(void)
 	sprintf(gmmsg,"Searching for %s Partition", gmChar);
 	println(line++,gmmsg);
 	uint32_t appBufLen = SECTOR_SIZE*NUM_SECTORS;
-	void *appBuf = MEMBucket_alloc(appBufLen, 0x100);
+	void *appBuf = aligned_alloc(0x100, appBufLen);
 	//write game .app data next
 	int gmPart;
 	for(gmPart = 0; gmPart < numPartitions; gmPart++)
@@ -616,7 +619,7 @@ int Menu_Main(void)
 	}
 	println(line++,"Reading GM Header from WUD");
 	offset = ((uint64_t)tbl[gmPart].offsetBE)*0x8000;
-	uint8_t *fHdr = MEMBucket_alloc(0x8000, 0x100);
+	uint8_t *fHdr = aligned_alloc(0x100, 0x8000);
 	fsa_odd_seek(offset);
 	fsa_odd_read(fsaFd, oddFd, fHdr, 0x8000, 1);
 	uint32_t fHdrCnt = *(uint32_t*)(fHdr+0x10);
@@ -625,7 +628,7 @@ int Menu_Main(void)
 	//grab FST first
 	println(line++,"Reading GM FST from WUD");
 	uint64_t fstSize = tmd->Contents[0].Size;
-	fstEnc = MEMBucket_alloc(ALIGN_FORWARD(fstSize,16), 0x100);
+	fstEnc = aligned_alloc(0x100, ALIGN_FORWARD(fstSize,16));
 	fsa_odd_seek(offset + 0x8000);
 	fsa_odd_read(fsaFd, oddFd, fstEnc, ALIGN_FORWARD(fstSize,16), 1);
 	//write FST to file
@@ -647,9 +650,9 @@ int Menu_Main(void)
 	uint16_t content_index = tmd->Contents[0].Index;
 	memcpy(iv, &content_index, 2);
 	aes_set_key(tikKey);
-	fstDec = MEMBucket_alloc(ALIGN_FORWARD(fstSize,16), 0x100);
+	fstDec = aligned_alloc(0x100, ALIGN_FORWARD(fstSize,16));
 	aes_decrypt(iv, fstEnc, fstDec, ALIGN_FORWARD(fstSize,16));
-	MEMBucket_free(fstEnc);
+	free(fstEnc);
 	app_tbl_t *appTbl = (app_tbl_t*)(fstDec+0x20);
 
 	//write in files
@@ -669,14 +672,14 @@ int Menu_Main(void)
 		sprintf(titlesmsg,"Dumping title %d/%d",curCont,titleCnt-1);
 		sprintf(outF,"%s/%08x.app",outDir,curContentCid);
 		sprintf(outbuf,"Writing %08x.app",curContentCid);
-		OSScreenClearBufferEx(0, 0);
-		OSScreenClearBufferEx(1, 0);
+		OSScreenClearBufferEx(SCREEN_TV, 0);
+		OSScreenClearBufferEx(SCREEN_DRC, 0);
 		printhdr_noflip();
 		println_noflip(2,discStr);
 		println_noflip(3,titlesmsg);
 		println_noflip(4,outbuf);
-		OSScreenFlipBuffersEx(0);
-		OSScreenFlipBuffersEx(1);
+		OSScreenFlipBuffersEx(SCREEN_TV);
+		OSScreenFlipBuffersEx(SCREEN_DRC);
 		line=5;
 		FILE *t = fopen(outF, "wb");
 		if (t == NULL) {
@@ -691,15 +694,15 @@ int Menu_Main(void)
 			fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
 			fwrite(appBuf, 1, toWrite, t);
 			total -= toWrite;
-			OSScreenClearBufferEx(0, 0);
-			OSScreenClearBufferEx(1, 0);
+			OSScreenClearBufferEx(SCREEN_TV, 0);
+			OSScreenClearBufferEx(SCREEN_DRC, 0);
 			printhdr_noflip();
 			println_noflip(2,discStr);
 			println_noflip(3,titlesmsg);
 			println_noflip(4,outbuf);
 			println_noflip(5,progress);
-			OSScreenFlipBuffersEx(0);
-			OSScreenFlipBuffersEx(1);
+			OSScreenFlipBuffersEx(SCREEN_TV);
+			OSScreenFlipBuffersEx(SCREEN_DRC);
 		}
 		line=6;
 		fclose(t);
@@ -722,9 +725,9 @@ int Menu_Main(void)
 			hashPos += (0x14*hashNum);
 		}
 	}
-	MEMBucket_free(fstDec);
-	MEMBucket_free(appBuf);
-	MEMBucket_free(tmdBuf);
+	free(fstDec);
+	free(appBuf);
+	free(tmdBuf);
 
 	println(line++,"Done!");
 
@@ -733,8 +736,8 @@ int Menu_Main(void)
 		if(IMEnableAPD() == 0)
 			println_noflip(line++, "Re-Enabled Auto Power-Down.");
 	}
-	OSScreenFlipBuffersEx(0);
-	OSScreenFlipBuffersEx(1);
+	OSScreenFlipBuffersEx(SCREEN_TV);
+	OSScreenFlipBuffersEx(SCREEN_DRC);
 
 prgEnd:
 	//close down everything fsa related
@@ -742,8 +745,8 @@ prgEnd:
 	{
 		if(f != NULL)
 			fclose(f);
-		fatUnmount("sd:");
-		fatUnmount("usb:");
+		fatUnmount("sd");
+		fatUnmount("usb");
 		if(oddFd >= 0)
 			IOSUHAX_FSA_RawClose(fsaFd, oddFd);
 		IOSUHAX_FSA_Close(fsaFd);
@@ -754,9 +757,9 @@ prgEnd:
 	//will do IOSU reboot
 	OSForceFullRelaunch();
 	SYSLaunchMenu();
-	OSScreenEnableEx(0, 0);
-	OSScreenEnableEx(1, 0);
-	MEMBucket_free(screenBuffer);
-	memoryRelease();
+	OSScreenEnableEx(SCREEN_TV, 0);
+	OSScreenEnableEx(SCREEN_DRC, 0);
+	if (tvBuffer) free(tvBuffer);
+    if (drcBuffer) free(drcBuffer);
 	return EXIT_RELAUNCH_ON_LOAD;
 }

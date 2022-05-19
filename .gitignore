@@ -4,3 +4,4 @@ payload/*
 *.elf
 *.bin
 *.zip
+*.rpx
