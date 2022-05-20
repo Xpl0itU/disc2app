@@ -24,6 +24,7 @@
 #include <coreinit/thread.h>
 #include <coreinit/energysaver.h>
 #include <sysapp/launch.h>
+#include <whb/proc.h>
 #include "common/common.h"
 #include "exploit.h"
 #include "../payload/wupserver_bin.h"
@@ -32,7 +33,15 @@
 #include "tmd.h"
 #include "structs.h"
 
-void OSForceFullRelaunch(void);
+int action = 0;
+int fsaFd = -1;
+int oddFd = -1;
+FILE *f = NULL;
+
+int vpadError = -1;
+VPADStatus vpad;
+KPADStatus kpad;
+
 #define ALIGN_FORWARD(x, alignment) (((x) + ((alignment)-1)) & (~((alignment)-1)))
 
 //just to be able to call async
@@ -167,126 +176,7 @@ void printhdr_noflip()
 	println_noflip(0,hdrStr);
 }
 
-int main()
-{
-	VPADInit();
-	KPADInit();
-
-	// Init screen
-	OSScreenInit();
-	size_t tvBufferSize = OSScreenGetBufferSizeEx(SCREEN_TV);
-    size_t drcBufferSize = OSScreenGetBufferSizeEx(SCREEN_DRC);
-    void* tvBuffer = memalign(0x100, tvBufferSize);
-    void* drcBuffer = memalign(0x100, drcBufferSize);
-	OSScreenSetBufferEx(SCREEN_TV, tvBuffer);
-    OSScreenSetBufferEx(SCREEN_DRC, drcBuffer);
-    OSScreenEnableEx(SCREEN_TV, true);
-    OSScreenEnableEx(SCREEN_DRC, true);
-	OSScreenClearBufferEx(SCREEN_TV, 0);
-	OSScreenClearBufferEx(SCREEN_DRC, 0);
-
-	printhdr_noflip();
-	println_noflip(2,"Please make sure to take out any currently inserted disc.");
-	println_noflip(3,"Also make sure you have at least 23.3GB free on your device.");
-	println_noflip(4,"Press A to continue with a FAT32 SD Card as destination.");
-	println_noflip(5,"Press B to continue with a FAT32 USB Device as destination.");
-	println_noflip(6,"Press HOME to return to the Homebrew Launcher.");
-	OSScreenFlipBuffersEx(SCREEN_TV);
-	OSScreenFlipBuffersEx(SCREEN_DRC);
-
-	int vpadError = -1;
-	VPADStatus vpad;
-	KPADStatus kpad;
-
-    // set everything to 0 because some vars will stay uninitialized on first read
-    memset(&kpad, 0, sizeof(kpad));
-
-	int action = 0;
-	bool exitMainLoop = false;
-	while(1)
-	{
-		VPADRead(0, &vpad, 1, &vpadError);
-		if(vpadError == 0)
-		{
-			if(vpad.trigger & VPAD_BUTTON_HOME)
-			{
-				if (tvBuffer) free(tvBuffer);
-    			if (drcBuffer) free(drcBuffer);
-				return EXIT_SUCCESS;
-			}
-			else if(vpad.trigger & VPAD_BUTTON_A)
-				break;
-			else if(vpad.trigger & VPAD_BUTTON_B)
-			{
-				action = 1;
-				break;
-			}
-		}
-
-		for (int i = 0; i < 4; i++)
-		{
-			uint32_t controllerType;
-			// check if the controller is connected
-			if (WPADProbe(i, &controllerType) != 0)
-				continue;
-
-			KPADRead(i, &kpad, 1);
-
-			switch (controllerType)
-			{
-			case WPAD_EXT_CORE:
-				if(kpad.trigger & WPAD_BUTTON_HOME)
-				{
-					if (tvBuffer) free(tvBuffer);
-    				if (drcBuffer) free(drcBuffer);
-					return EXIT_SUCCESS;
-				}
-				else if(kpad.trigger & WPAD_BUTTON_A)
-					exitMainLoop = true;
-				else if(kpad.trigger & WPAD_BUTTON_B)
-				{
-					action = 1;
-					exitMainLoop = true;
-				}
-				break;
-			case WPAD_EXT_CLASSIC:
-				if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
-				{
-					if (tvBuffer) free(tvBuffer);
-    				if (drcBuffer) free(drcBuffer);
-					return EXIT_SUCCESS;
-				}
-				else if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_A)
-					exitMainLoop = true;
-				else if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_B)
-				{
-					action = 1;
-					exitMainLoop = true;
-				}
-				break;
-			case WPAD_EXT_PRO_CONTROLLER:
-				if(kpad.pro.trigger & WPAD_PRO_BUTTON_HOME)
-				{
-					if (tvBuffer) free(tvBuffer);
-    				if (drcBuffer) free(drcBuffer);
-					return EXIT_SUCCESS;
-				}
-				else if(kpad.pro.trigger & WPAD_PRO_BUTTON_A)
-					exitMainLoop = true;
-				else if(kpad.pro.trigger & WPAD_PRO_BUTTON_B)
-				{
-					action = 1;
-					exitMainLoop = true;
-				}
-				break;
-			}
-		}
-
-		if (exitMainLoop)
-			break;
-
-		usleep(50000);
-	}
+static void dump() {
 	int j;
 	for(j = 0; j < 2; j++)
 	{
@@ -304,18 +194,15 @@ int main()
 	memcpy((void*)0xF5E70020, &wupserver_bin, wupserver_bin_len);
 	DCStoreRange((void*)0xF5E70000, wupserver_bin_len + 0x40);
 	IOSUExploit();
-	int fsaFd = -1;
-	int oddFd = -1;
 	int ret;
 	char outDir[64];
-	FILE *f = NULL;
 	sha1_context sha1ctx;
 
 	//done with iosu exploit, take over mcp
 	if(MCPHookOpen() < 0)
 	{
 		println(line++,"MCP hook could not be opened!");
-		goto prgEnd;
+		return;
 	}
 	memset((void*)0xF5E10C00, 0, 0x20);
 	DCFlushRange((void*)0xF5E10C00, 0x20);
@@ -326,7 +213,7 @@ int main()
 	if(fsaFd < 0)
 	{
 		println(line++,"FSA could not be opened!");
-		goto prgEnd;
+		return;
 	}
 	fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
 	fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
@@ -342,7 +229,7 @@ int main()
 		if(vpadError == 0)
 		{
 			if(vpad.trigger & VPAD_BUTTON_HOME)
-				goto prgEnd;
+				return;
 		}
 
 		for (int i = 0; i < 4; i++)
@@ -358,15 +245,15 @@ int main()
 			{
 			case WPAD_EXT_CORE:
 				if(kpad.trigger & WPAD_BUTTON_HOME)
-					goto prgEnd;
+					return;
 				break;
 			case WPAD_EXT_CLASSIC:
 				if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
-					goto prgEnd;
+					return;
 				break;
 			case WPAD_EXT_PRO_CONTROLLER:
 				if(kpad.pro.trigger & WPAD_PRO_BUTTON_HOME)
-					goto prgEnd;
+					return;
 				break;
 			}
 		}
@@ -387,7 +274,7 @@ int main()
 	if(ret < 0)
 	{
 		println(line++,"Failed to open Raw ODD!");
-		goto prgEnd;
+		return;
 	}
 
 	//get disc name for folder
@@ -397,7 +284,7 @@ int main()
 	if(fsa_odd_read(fsaFd, oddFd, discId, 10, 0))
 	{
 		println(line++,"Failed to read first disc sector!");
-		goto prgEnd;		
+		return;		
 	}
 	char discStr[64];
 	sprintf(discStr, "Inserted %s", discId);
@@ -443,7 +330,7 @@ int main()
 	if(*(uint32_t*)partTbl != 0xCCA6E67B)
 	{
 		println(line++, "Invalid FST!");
-		goto prgEnd;
+		return;
 	}
 
 	//make sure TOC is actually valid
@@ -462,7 +349,7 @@ int main()
 	if(memcmp(sha1, expectedHash, 0x14) != 0)
 	{
 		println(line++,"Invalid TOC SHA1!");
-		goto prgEnd;
+		return;
 	}
 
 	int numPartitions = *(uint32_t*)(partTbl+0x1C);
@@ -482,7 +369,7 @@ int main()
 	if(strncasecmp(tbl[siPart].name,"SI",3) != 0)
 	{
 		println(line++,"No SI Partition found!");
-		goto prgEnd;
+		return;
 	}
 
 	//dont care about first header but only about data
@@ -535,7 +422,7 @@ int main()
 			FILE *t = fopen(outF, "wb");
 			if (t == NULL) {
 				println(line++,"Failed to create file");
-				goto prgEnd;
+				return;
 			}
 			fwrite(titleDec, 1, CNTSize, t);
 			fclose(t);
@@ -550,7 +437,7 @@ int main()
 				FILE *t = fopen(outF, "wb");
 				if (t == NULL) {
 					println(line++,"Failed to create file");
-					goto prgEnd;
+					return;
 				}
 				fwrite(titleDec, 1, CNTSize, t);
 				fclose(t);
@@ -576,7 +463,7 @@ int main()
 				FILE *t = fopen(outF, "wb");
 				if (t == NULL) {
 					println(line++,"Failed to create file");
-					goto prgEnd;
+					return;
 				}
 				fwrite(titleDec, 1, CNTSize, t);
 				fclose(t);
@@ -594,7 +481,7 @@ int main()
 	if(!tikFound || !tmdFound)
 	{
 		println(line++,"tik or tmd not found!");
-		goto prgEnd;
+		return;
 	}
 	TitleMetaData *tmd = (TitleMetaData*)tmdBuf;
 	char gmChar[19];
@@ -615,7 +502,7 @@ int main()
 	if(strncasecmp(tbl[gmPart].name,gmChar,18) != 0)
 	{
 		println(line++,"No GM Partition found!");
-		goto prgEnd;
+		return;
 	}
 	println(line++,"Reading GM Header from WUD");
 	offset = ((uint64_t)tbl[gmPart].offsetBE)*0x8000;
@@ -641,7 +528,7 @@ int main()
 	FILE *t = fopen(outF, "wb");
 	if (t == NULL) {
 		println(line++,"Failed to create file");
-		goto prgEnd;
+		return;
 	}
 	fwrite(fstEnc, 1, ALIGN_FORWARD(fstSize,16), t);
 	fclose(t);
@@ -684,7 +571,7 @@ int main()
 		FILE *t = fopen(outF, "wb");
 		if (t == NULL) {
 			println(line++,"Failed to create file");
-			goto prgEnd;
+			return;
 		}
 		uint64_t total = tSize;
 		while(total > 0)
@@ -717,7 +604,7 @@ int main()
 			t = fopen(outF, "wb");
 			if (t == NULL) {
 				println(line++,"Failed to create file");
-				goto prgEnd;
+				return;
 			}
 			uint32_t hashNum = (uint32_t)((tSize / 0x10000000ULL) + 1);
 			fwrite(hashPos, 1, (0x14*hashNum), t);
@@ -738,9 +625,117 @@ int main()
 	}
 	OSScreenFlipBuffersEx(SCREEN_TV);
 	OSScreenFlipBuffersEx(SCREEN_DRC);
+}
 
-prgEnd:
-	//close down everything fsa related
+int main()
+{
+	VPADInit();
+	KPADInit();
+
+	WHBProcInit();
+
+	// Init screen
+	OSScreenInit();
+	size_t tvBufferSize = OSScreenGetBufferSizeEx(SCREEN_TV);
+    size_t drcBufferSize = OSScreenGetBufferSizeEx(SCREEN_DRC);
+    void* tvBuffer = memalign(0x100, tvBufferSize);
+    void* drcBuffer = memalign(0x100, drcBufferSize);
+	OSScreenSetBufferEx(SCREEN_TV, tvBuffer);
+    OSScreenSetBufferEx(SCREEN_DRC, drcBuffer);
+    OSScreenEnableEx(SCREEN_TV, true);
+    OSScreenEnableEx(SCREEN_DRC, true);
+	OSScreenClearBufferEx(SCREEN_TV, 0);
+	OSScreenClearBufferEx(SCREEN_DRC, 0);
+
+	printhdr_noflip();
+	println_noflip(2,"Please make sure to take out any currently inserted disc.");
+	println_noflip(3,"Also make sure you have at least 23.3GB free on your device.");
+	println_noflip(4,"Press A to continue with a FAT32 SD Card as destination.");
+	println_noflip(5,"Press B to continue with a FAT32 USB Device as destination.");
+	println_noflip(6,"Press HOME to return to the Homebrew Launcher.");
+	OSScreenFlipBuffersEx(SCREEN_TV);
+	OSScreenFlipBuffersEx(SCREEN_DRC);
+
+    // set everything to 0 because some vars will stay uninitialized on first read
+    memset(&kpad, 0, sizeof(kpad));
+
+	bool exitMainLoop = false;
+	while(WHBProcIsRunning())
+	{
+		VPADRead(0, &vpad, 1, &vpadError);
+		if(vpadError == 0)
+		{
+			if(vpad.trigger & VPAD_BUTTON_A) {
+				dump();
+				break;
+			}
+				
+			else if(vpad.trigger & VPAD_BUTTON_B)
+			{
+				action = 1;
+				dump();
+				break;
+			}
+		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			uint32_t controllerType;
+			// check if the controller is connected
+			if (WPADProbe(i, &controllerType) != 0)
+				continue;
+
+			KPADRead(i, &kpad, 1);
+
+			switch (controllerType)
+			{
+			case WPAD_EXT_CORE:
+				if(kpad.trigger & WPAD_BUTTON_A) {
+					exitMainLoop = true;
+					dump();
+				}
+					
+				else if(kpad.trigger & WPAD_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+					dump();
+				}
+				break;
+			case WPAD_EXT_CLASSIC:
+				if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_A) {
+					exitMainLoop = true;
+					dump();
+				}
+					
+				else if(kpad.classic.trigger & WPAD_CLASSIC_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+					dump();
+				}
+				break;
+			case WPAD_EXT_PRO_CONTROLLER:
+				if(kpad.pro.trigger & WPAD_PRO_BUTTON_A) {
+					exitMainLoop = true;
+					dump();
+				}
+				else if(kpad.pro.trigger & WPAD_PRO_BUTTON_B)
+				{
+					action = 1;
+					exitMainLoop = true;
+					dump();
+				}
+				break;
+			}
+		}
+
+		if (exitMainLoop)
+			break;
+
+		usleep(50000);
+	}
+	
 	if(fsaFd >= 0)
 	{
 		if(f != NULL)
@@ -754,12 +749,10 @@ prgEnd:
 	//close out old mcp instance
 	MCPHookClose();
 	sleep(5);
-	//will do IOSU reboot
-	OSForceFullRelaunch();
-	SYSLaunchMenu();
-	OSScreenEnableEx(SCREEN_TV, 0);
-	OSScreenEnableEx(SCREEN_DRC, 0);
 	if (tvBuffer) free(tvBuffer);
     if (drcBuffer) free(drcBuffer);
-	return EXIT_RELAUNCH_ON_LOAD;
+	OSScreenShutdown();
+	WHBProcShutdown();
+    IOSUHAX_Close();
+	return 1;
 }
