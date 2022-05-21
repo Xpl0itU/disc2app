@@ -4,6 +4,7 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 #include <malloc.h>
@@ -32,6 +33,8 @@
 #include "fst.h"
 #include "tmd.h"
 #include "structs.h"
+#include "log_freetype.h"
+#include "draw.h"
 
 int action = 0;
 int fsaFd = -1;
@@ -77,21 +80,10 @@ void MCPHookClose()
 	mcp_hook_fd = -1;
 }
 
-void println_noflip(int line, const char *msg)
-{
-	OSScreenPutFontEx(SCREEN_TV,0,line,msg);
-	OSScreenPutFontEx(SCREEN_DRC,0,line,msg);
-}
-
 void println(int line, const char *msg)
 {
-	int i;
-	for(i = 0; i < 2; i++)
-	{	//double-buffered font write
-		println_noflip(line,msg);
-		OSScreenFlipBuffersEx(SCREEN_TV);
-		OSScreenFlipBuffersEx(SCREEN_DRC);
-	}
+	WHBLogPrint(msg);
+	WHBLogFreetypeDraw();
 }
 
 #define SECTOR_SIZE 2048
@@ -173,20 +165,12 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 static const char *hdrStr = "disc2app WUT Port (based on wudump and wud2app by FIX94)";
 void printhdr_noflip()
 {
-	println_noflip(0,hdrStr);
+	WHBLogPrint(hdrStr);
+	WHBLogPrint("");
 }
 
 static void dump() {
-	int j;
-	for(j = 0; j < 2; j++)
-	{
-		OSScreenClearBufferEx(SCREEN_TV, 0);
-		OSScreenClearBufferEx(SCREEN_DRC, 0);
-		printhdr_noflip();
-		OSScreenFlipBuffersEx(SCREEN_TV);
-		OSScreenFlipBuffersEx(SCREEN_DRC);
-		usleep(25000);
-	}
+	WHBLogFreetypeClear();
 	int line = 2;
 	//will inject our custom mcp code
 	println(line++,"Doing IOSU Exploit...");
@@ -474,8 +458,7 @@ static void dump() {
 		}
 		free(titleDec);
 	}
-	OSScreenClearBufferEx(SCREEN_TV, 0);
-	OSScreenClearBufferEx(SCREEN_DRC, 0);
+	WHBLogFreetypeClear();
 	free(fstDec);
 
 	if(!tikFound || !tmdFound)
@@ -548,6 +531,7 @@ static void dump() {
 	char progress[64];
 	for(curCont = 1; curCont < titleCnt; curCont++)
 	{
+		WHBLogFreetypeClear();
 		uint64_t appOffset = ((uint64_t)appTbl[curCont].offsetBE)*0x8000;
 		uint64_t totalAppOffset = offset + appOffset;
 		fsa_odd_seek(totalAppOffset);
@@ -559,14 +543,11 @@ static void dump() {
 		sprintf(titlesmsg,"Dumping title %d/%d",curCont,titleCnt-1);
 		sprintf(outF,"%s/%08x.app",outDir,curContentCid);
 		sprintf(outbuf,"Writing %08x.app",curContentCid);
-		OSScreenClearBufferEx(SCREEN_TV, 0);
-		OSScreenClearBufferEx(SCREEN_DRC, 0);
 		printhdr_noflip();
-		println_noflip(2,discStr);
-		println_noflip(3,titlesmsg);
-		println_noflip(4,outbuf);
-		OSScreenFlipBuffersEx(SCREEN_TV);
-		OSScreenFlipBuffersEx(SCREEN_DRC);
+		WHBLogPrint(discStr);
+		WHBLogPrint(titlesmsg);
+		WHBLogPrint(outbuf);
+		WHBLogFreetypeDraw();
 		line=5;
 		FILE *t = fopen(outF, "wb");
 		if (t == NULL) {
@@ -577,19 +558,17 @@ static void dump() {
 		while(total > 0)
 		{
 			uint32_t toWrite = ((total > (uint64_t)appBufLen) ? (appBufLen) : (uint32_t)(total));
-			sprintf(progress,"0x%08X/0x%08X (%i%%)",(uint32_t)(tSize-total),(uint32_t)tSize,(uint32_t)((tSize-total)*100/tSize));
+			sprintf(progress,"0x%08X/0x%08X (%i% %)",(uint32_t)(tSize-total),(uint32_t)tSize,(uint32_t)((tSize-total)*100/tSize));
 			fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
 			fwrite(appBuf, 1, toWrite, t);
 			total -= toWrite;
-			OSScreenClearBufferEx(SCREEN_TV, 0);
-			OSScreenClearBufferEx(SCREEN_DRC, 0);
+			WHBLogFreetypeClear();
 			printhdr_noflip();
-			println_noflip(2,discStr);
-			println_noflip(3,titlesmsg);
-			println_noflip(4,outbuf);
-			println_noflip(5,progress);
-			OSScreenFlipBuffersEx(SCREEN_TV);
-			OSScreenFlipBuffersEx(SCREEN_DRC);
+			WHBLogPrint(discStr);
+			WHBLogPrint(titlesmsg);
+			WHBLogPrint(outbuf);
+			WHBLogPrint(progress);
+			WHBLogFreetypeDraw();
 		}
 		line=6;
 		fclose(t);
@@ -616,15 +595,14 @@ static void dump() {
 	free(appBuf);
 	free(tmdBuf);
 
-	println(line++,"Done!");
+	WHBLogPrint("Done!");
 
 	if(apd_enabled)
 	{
 		if(IMEnableAPD() == 0)
-			println_noflip(line++, "Re-Enabled Auto Power-Down.");
+			WHBLogPrint("Re-Enabled Auto Power-Down.");
 	}
-	OSScreenFlipBuffersEx(SCREEN_TV);
-	OSScreenFlipBuffersEx(SCREEN_DRC);
+	WHBLogFreetypeDraw();
 }
 
 int main()
@@ -635,26 +613,15 @@ int main()
 	WHBProcInit();
 
 	// Init screen
-	OSScreenInit();
-	size_t tvBufferSize = OSScreenGetBufferSizeEx(SCREEN_TV);
-    size_t drcBufferSize = OSScreenGetBufferSizeEx(SCREEN_DRC);
-    void* tvBuffer = memalign(0x100, tvBufferSize);
-    void* drcBuffer = memalign(0x100, drcBufferSize);
-	OSScreenSetBufferEx(SCREEN_TV, tvBuffer);
-    OSScreenSetBufferEx(SCREEN_DRC, drcBuffer);
-    OSScreenEnableEx(SCREEN_TV, true);
-    OSScreenEnableEx(SCREEN_DRC, true);
-	OSScreenClearBufferEx(SCREEN_TV, 0);
-	OSScreenClearBufferEx(SCREEN_DRC, 0);
+	WHBLogFreetypeInit();
 
 	printhdr_noflip();
-	println_noflip(2,"Please make sure to take out any currently inserted disc.");
-	println_noflip(3,"Also make sure you have at least 23.3GB free on your device.");
-	println_noflip(4,"Press A to continue with a FAT32 SD Card as destination.");
-	println_noflip(5,"Press B to continue with a FAT32 USB Device as destination.");
-	println_noflip(6,"Press HOME to return to the Homebrew Launcher.");
-	OSScreenFlipBuffersEx(SCREEN_TV);
-	OSScreenFlipBuffersEx(SCREEN_DRC);
+	WHBLogPrint("Please make sure to take out any currently inserted disc.");
+	WHBLogPrint("Also make sure you have at least 23.3GB free on your device.");
+	WHBLogPrint("Press A to continue with a FAT32 SD Card as destination.");
+	WHBLogPrint("Press B to continue with a FAT32 USB Device as destination.");
+	WHBLogPrint("Press HOME to return to the Homebrew Launcher.");
+	WHBLogFreetypeDraw();
 
     // set everything to 0 because some vars will stay uninitialized on first read
     memset(&kpad, 0, sizeof(kpad));
@@ -748,10 +715,7 @@ int main()
 	}
 	//close out old mcp instance
 	MCPHookClose();
-	sleep(5);
-	if (tvBuffer) free(tvBuffer);
-    if (drcBuffer) free(drcBuffer);
-	OSScreenShutdown();
+	WHBLogFreetypeFree();
 	WHBProcShutdown();
     IOSUHAX_Close();
 	return 1;
