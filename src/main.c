@@ -26,7 +26,6 @@
 #include <coreinit/energysaver.h>
 #include <sysapp/launch.h>
 #include <whb/proc.h>
-#include "common/common.h"
 #include "exploit.h"
 #include "../payload/wupserver_bin.h"
 #include "rijndael.h"

@@ -1,6 +1,4 @@
-
-#ifndef _STRUCTS_H_
-#define _STRUCTS_H_
+#pragma once
 
 typedef struct _toc_t {
 	char name[0x1f];
@@ -16,5 +14,3 @@ typedef struct _app_tbl_t {
 	uint32_t gid;
 	char unk[0xC];
 } __attribute__ ((gcc_struct, __packed__)) app_tbl_t;
-
-#endif

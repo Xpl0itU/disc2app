@@ -1,6 +1,4 @@
-
-#ifndef _FST_H_
-#define _FST_H_
+#pragma once
 
 typedef struct _FEntry
 {
@@ -30,5 +28,3 @@ typedef struct _FEntry
 	uint16_t Flags;
 	uint16_t ContentID;
 } __attribute__ ((gcc_struct, __packed__)) FEntry;
-
-#endif

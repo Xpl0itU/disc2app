@@ -1,6 +1,4 @@
-
-#ifndef _TMD_H_
-#define _TMD_H_
+#pragma once
 
 typedef struct
 {
@@ -48,5 +46,3 @@ typedef struct _TitleMetaData
 	Content Contents[];				// 0x1E4
 
 } __attribute__ ((gcc_struct, __packed__)) TitleMetaData;
-
-#endif
