@@ -19,8 +19,6 @@ extern "C" {
 bool WHBLogFreetypeInit();
 void WHBLogFreetypeFree();
 
-void drawPixel(int32_t x, int32_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-
 // Logging
 void WHBLogFreetypePrintf(const char *fmt, ...);
 void WHBLogFreetypePrint(const char *line);
@@ -32,6 +30,7 @@ void WHBLogFreetypeStartScreen();
 void WHBLogFreetypePrintfAtPosition(uint32_t position, const char *fmt, ...);
 void WHBLogFreetypePrintAtPosition(uint32_t position, const char *line);
 void WHBLogFreetypeScreenPrintBottom(const char *line);
+void WHBLogFreetypeScreenPrintfBottom(const char *fmt, ...);
 uint32_t WHBLogFreetypeScreenSize();
 uint32_t WHBLogFreetypeGetScreenPosition();
 void WHBLogFreetypeDrawScreen();

@@ -5,9 +5,10 @@
 ifeq ($(strip $(DEVKITPRO)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitpro")
 endif
-export LIBOGC_INC	:=	$(DEVKITPRO)/libogc/include
-export LIBOGC_LIB	:=	$(DEVKITPRO)/libogc/lib/wii
-export PORTLIBS		:=	$(DEVKITPRO)/portlibs/ppc
+export LIBOGC_INC	 :=	$(DEVKITPRO)/libogc/include
+export LIBOGC_LIB	 :=	$(DEVKITPRO)/libogc/lib/wii
+export PORTLIBS_PPC	 :=	$(DEVKITPRO)/portlibs/ppc
+export PORTLIBS_WIIU :=	$(DEVKITPRO)/portlibs/wiiu
 
 TOPDIR ?= $(CURDIR)
 
@@ -29,10 +30,10 @@ DEFS        :=
 # options for code generation
 #-------------------------------------------------------------------------------
 CFLAGS	:=	-std=gnu2x -g -Wall -Ofast -ffunction-sections `freetype-config --cflags` \
-			$(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__
+			$(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__ -D__wiiu__
 
 CXXFLAGS	:= -std=gnu++20 -g -Wall -Wno-int-in-bool-context -Wno-format-overflow -Ofast -fpermissive -ffunction-sections `freetype-config --cflags` \
-			$(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__
+			$(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__ -D__wiiu__
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-g $(ARCH) $(RPXSPECS) -Wl,-Map,$(notdir $*.map)
@@ -43,7 +44,7 @@ LIBS	:= -lfat -lwut -liosuhax `freetype-config --libs`
 # list of directories containing libraries, this must be the top level
 # containing include and lib
 #-------------------------------------------------------------------------------
-LIBDIRS	:= $(PORTLIBS) $(WUT_ROOT) $(WUT_ROOT)/usr $(CURDIR)/libfat
+LIBDIRS	:= $(PORTLIBS_PPC) $(PORTLIBS_WIIU) $(WUT_ROOT) $(WUT_ROOT)/usr
 
 #-------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional

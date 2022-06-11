@@ -1,7 +1,8 @@
 #include "log_freetype.h"
-#include "draw.h"
 
+#include <string>
 #include <freetype2/ft2build.h>
+#include <stdint.h>
 #include FT_FREETYPE_H
 
 #define CONSOLE_FRAME_HEAP_TAG (0x0002B2B)
@@ -200,7 +201,8 @@ int32_t renderLine(int32_t x, int32_t y, char *string, bool wrap) {
 void WHBLogFreetypeDraw() {
     if (!freetypeHasForeground) return;
 
-    clearBuffersEx();
+    OSScreenClearBufferEx(SCREEN_TV, backgroundColor);
+    OSScreenClearBufferEx(SCREEN_DRC, backgroundColor);
     const int32_t x = 0;
 
     for (int32_t y=0; y<NUM_LINES; y++) {
@@ -279,12 +281,15 @@ bool WHBLogFreetypeInit() {
     uint32_t fontSize;
     OSGetSharedData(OS_SHAREDDATATYPE_FONT_STANDARD, 0, (void**)&fontBuffer, &fontSize);
 
-    if ((result = FT_New_Memory_Face(fontLibrary, fontBuffer, fontSize, 0, &fontFace)) != 0)
+    if ((result = FT_New_Memory_Face(fontLibrary, fontBuffer, fontSize, 0, &fontFace)) != 0) {
         return true;
-    if ((result = FT_Select_Charmap(fontFace, FT_ENCODING_UNICODE)) != 0)
+    }
+    if ((result = FT_Select_Charmap(fontFace, FT_ENCODING_UNICODE)) != 0) {
         return true;
-    if ((result = FT_Set_Pixel_Sizes(fontFace, 0, 22)))
+    }
+    if (WHBLogFreetypeSetFontSize(22, 0)) {
         return true;
+    }
 
     WHBAddLogHandler(FreetypeAddLine);
     return false;
@@ -344,6 +349,15 @@ void WHBLogFreetypeScreenPrintBottom(const char *line) {
     memcpy(queueBuffer[NUM_LINES - 1], line, length);
     queueBuffer[NUM_LINES - 1][length] = '\0';
     if (bottomLines < NUM_LINES-1) bottomLines++;
+}
+
+void WHBLogFreetypeScreenPrintfBottom(const char *fmt, ...) {
+    char buf[255];
+    va_list va;
+    va_start(va, fmt);
+    sprintf(buf, fmt, va);
+    WHBLogFreetypeScreenPrintBottom(buf);
+    va_end(va);
 }
 
 uint32_t WHBLogFreetypeScreenSize() {
