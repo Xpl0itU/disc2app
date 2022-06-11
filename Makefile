@@ -24,7 +24,7 @@ TARGET		:=	disc2app
 BUILD		:=	build
 SOURCES		:=	src
 DATA		:=  
-INCLUDES	:=  src include libfat/include payload
+INCLUDES	:=  src include payload
 DEFS        :=  
 #-------------------------------------------------------------------------------
 # options for code generation
