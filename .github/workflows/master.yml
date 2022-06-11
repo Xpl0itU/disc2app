@@ -5,7 +5,7 @@ on:
     types: [ opened, reopened ]
   push:
     branches:
-      - refactor
+      - master
 
 jobs:
   build-binary:
