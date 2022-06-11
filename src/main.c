@@ -684,6 +684,5 @@ int main() {
     MCPHookClose();
     WHBLogFreetypeFree();
     WHBProcShutdown();
-    IOSUHAX_Close();
     return 1;
 }
