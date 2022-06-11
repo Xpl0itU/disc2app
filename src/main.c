@@ -4,12 +4,12 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
+#define _GNU_SOURCE
 #include "../payload/wupserver_bin.h"
 #include "draw.h"
 #include "exploit.h"
 #include "fst.h"
 #include "log_freetype.h"
-#include "rijndael.h"
 #include "structs.h"
 #include "tmd.h"
 #include <coreinit/cache.h>
@@ -22,8 +22,6 @@
 #include <iosuhax.h>
 #include <malloc.h>
 #include <padscore/kpad.h>
-#include <polarssl/md5.h>
-#include <polarssl/sha1.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +31,8 @@
 #include <unistd.h>
 #include <vpad/input.h>
 #include <whb/proc.h>
+
+#include "crypto.h"
 
 bool usb = false;
 int fsaFd = -1;
@@ -75,8 +75,17 @@ void MCPHookClose() {
     mcp_hook_fd = -1;
 }
 
-void println(int line, const char *msg) {
-    WHBLogPrint(msg);
+void println(int line, const char *str, ...) {
+    char *tmp = NULL;
+
+    va_list va;
+    va_start(va, str);
+    if ((vasprintf(&tmp, str, va) >= 0) && (tmp != NULL))   
+        WHBLogPrint(tmp);
+
+    va_end(va);
+    if (tmp != NULL)
+        free(tmp);
     WHBLogFreetypeDraw();
 }
 
@@ -167,7 +176,9 @@ static void dump() {
     IOSUExploit();
     int ret;
     char outDir[64];
-    sha1_context sha1ctx;
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
+    EVP_MD_CTX *sha1ctx = EVP_MD_CTX_new();
 
     //done with iosu exploit, take over mcp
     if (MCPHookOpen() < 0) {
@@ -283,13 +294,13 @@ static void dump() {
     fsa_odd_read(fsaFd, oddFd, partTblEnc, 0x8000, 1);
     uint8_t iv[16];
     memset(iv, 0, 16);
-    aes_set_key(discKey);
     uint8_t *partTbl = aligned_alloc(0x100, 0x8000);
-    aes_decrypt(iv, partTblEnc, partTbl, 0x8000);
+    decrypt_aes(partTblEnc, 0x8000, discKey, iv, partTbl);
     free(partTblEnc);
 
     if (*(uint32_t *) partTbl != 0xCCA6E67B) {
         println(line++, "Invalid FST!");
+        sleep(5);
         return;
     }
 
@@ -300,11 +311,14 @@ static void dump() {
     expectedHash[2] = *(uint32_t *) (partTbl + 16);
     expectedHash[3] = *(uint32_t *) (partTbl + 20);
     expectedHash[4] = *(uint32_t *) (partTbl + 24);
-
-    sha1_starts(&sha1ctx);
-    sha1_update(&sha1ctx, partTbl + 0x800, 0x7800);
+    
+    EVP_DigestInit_ex(sha1ctx, EVP_sha1(), NULL);
+    EVP_DigestUpdate(sha1ctx, partTbl + 0x800, 0x7800);
     unsigned int sha1[5];
-    sha1_finish(&sha1ctx, (unsigned char *) sha1);
+    unsigned int sha1size;
+
+    EVP_DigestFinal_ex(sha1ctx, sha1, &sha1size);
+    EVP_MD_CTX_free(sha1ctx);
 
     if (memcmp(sha1, expectedHash, 0x14) != 0) {
         println(line++, "Invalid TOC SHA1!");
@@ -339,8 +353,7 @@ static void dump() {
     fsa_odd_read(fsaFd, oddFd, fstEnc, 0x8000, 1);
     void *fstDec = aligned_alloc(0x100, 0x8000);
     memset(iv, 0, 16);
-    aes_set_key(discKey);
-    aes_decrypt(iv, fstEnc, fstDec, 0x8000);
+    decrypt_aes(fstEnc, 0x8000, discKey, iv, fstDec);
     free(fstEnc);
     uint32_t EntryCount = (*(uint32_t *) (fstDec + 8) << 5);
     uint32_t Entries = *(uint32_t *) (fstDec + 0x20 + EntryCount + 8);
@@ -366,8 +379,7 @@ static void dump() {
         uint8_t *titleDec = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize, 16));
         memset(iv, 0, 16);
         memcpy(iv + 8, &CNT_IV, 8);
-        aes_set_key(discKey);
-        aes_decrypt(iv, titleF, titleDec, ALIGN_FORWARD(CNTSize, 16));
+        decrypt_aes(titleF, ALIGN_FORWARD(CNTSize, 16), discKey, iv, titleDec);
         free(titleF);
         char outF[64];
         sprintf(outF, "%s/%s", outDir, name);
@@ -401,8 +413,7 @@ static void dump() {
                     iv[k + 8] = 0x00;
                 }
                 uint8_t *tikKeyEnc = titleDec + 0x1BF;
-                aes_set_key(cKey);
-                aes_decrypt(iv, tikKeyEnc, tikKey, 16);
+                decrypt_aes(tikKeyEnc, 16, cKey, iv, tikKey);
             }
         } else if (strncasecmp(name, "title.tmd", 10) == 0 && !tmdFound) {
             uint32_t tidHigh = *(uint32_t *) (titleDec + 0x18C);
@@ -480,9 +491,8 @@ static void dump() {
     memset(iv, 0, 16);
     uint16_t content_index = tmd->Contents[0].Index;
     memcpy(iv, &content_index, 2);
-    aes_set_key(tikKey);
     fstDec = aligned_alloc(0x100, ALIGN_FORWARD(fstSize, 16));
-    aes_decrypt(iv, fstEnc, fstDec, ALIGN_FORWARD(fstSize, 16));
+    decrypt_aes(fstEnc, ALIGN_FORWARD(fstSize, 16), tikKey, iv, fstDec);
     free(fstEnc);
     app_tbl_t *appTbl = (app_tbl_t *) (fstDec + 0x20);
 
@@ -516,19 +526,18 @@ static void dump() {
         }
         uint64_t total = tSize;
         while (total > 0) {
-            uint32_t toWrite = ((total > (uint64_t) appBufLen) ? (appBufLen) : (uint32_t)(total));
-            sprintf(progress, "0x%08X/0x%08X", (uint32_t)(tSize - total), (uint32_t) tSize);
+            uint32_t toWrite = ((total > (uint64_t)appBufLen) ? (appBufLen) : (uint32_t)(total));
+			sprintf(progress,"0x%08X/0x%08X (%i% %)",(uint32_t)(tSize-total),(uint32_t)tSize,(uint32_t)((tSize-total)*100/tSize));
 			fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
-            fwrite(appBuf, 1, toWrite, t);
-            total -= toWrite;
-            WHBLogFreetypeClear();
-            printhdr_noflip();
-            WHBLogPrint(discStr);
-            WHBLogPrint(titlesmsg);
-            WHBLogPrint(outbuf);
-            WHBLogPrint(progress);
-			WHBLogFreetypeScreenPrintfBottom("Progress: %i %", (tSize - total) * 100 / tSize);
-            WHBLogFreetypeDraw();
+			fwrite(appBuf, 1, toWrite, t);
+			total -= toWrite;
+			WHBLogFreetypeClear();
+			printhdr_noflip();
+			WHBLogPrint(discStr);
+			WHBLogPrint(titlesmsg);
+			WHBLogPrint(outbuf);
+			WHBLogPrint(progress);
+			WHBLogFreetypeDraw();
 
             if (vpad.trigger & VPAD_BUTTON_B) {
                 fclose(t);
