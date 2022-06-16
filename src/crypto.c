@@ -1,8 +1,7 @@
 #include "crypto.h"
 
 int decrypt_aes(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
-            unsigned char *iv, unsigned char *plaintext)
-{
+                unsigned char *iv, unsigned char *plaintext) {
     EVP_CIPHER_CTX *ctx;
 
     int len;
@@ -10,7 +9,7 @@ int decrypt_aes(unsigned char *ciphertext, int ciphertext_len, unsigned char *ke
     int plaintext_len;
 
     /* Create and initialise the context */
-    if(!(ctx = EVP_CIPHER_CTX_new()))
+    if (!(ctx = EVP_CIPHER_CTX_new()))
         return -1;
 
     /*
@@ -20,14 +19,14 @@ int decrypt_aes(unsigned char *ciphertext, int ciphertext_len, unsigned char *ke
      * IV size for *most* modes is the same as the block size. For AES this
      * is 128 bits
      */
-    if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv))
+    if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv))
         return -1;
 
     /*
      * Provide the message to be decrypted, and obtain the plaintext output.
      * EVP_DecryptUpdate can be called multiple times if necessary.
      */
-    if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
+    if (1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
         return -1;
     plaintext_len = len;
 
@@ -35,7 +34,7 @@ int decrypt_aes(unsigned char *ciphertext, int ciphertext_len, unsigned char *ke
      * Finalise the decryption. Further plaintext bytes may be written at
      * this stage.
      */
-    if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
+    if (1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
         return -1;
     plaintext_len += len;
 

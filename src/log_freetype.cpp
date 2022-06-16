@@ -1,8 +1,8 @@
 #include "log_freetype.h"
 
-#include <string>
 #include <freetype2/ft2build.h>
 #include <stdint.h>
+#include <string>
 #include FT_FREETYPE_H
 
 #define CONSOLE_FRAME_HEAP_TAG (0x0002B2B)
@@ -15,20 +15,20 @@ uint32_t bottomLines = 0;
 
 bool freetypeHasForeground = false;
 
-uint8_t* frameBufferTVFrontPtr = NULL;
-uint8_t* frameBufferTVBackPtr = NULL;
+uint8_t *frameBufferTVFrontPtr = NULL;
+uint8_t *frameBufferTVBackPtr = NULL;
 uint32_t frameBufferTVSize = 0;
-uint8_t* frameBufferDRCFrontPtr = NULL;
-uint8_t* frameBufferDRCBackPtr = NULL;
+uint8_t *frameBufferDRCFrontPtr = NULL;
+uint8_t *frameBufferDRCBackPtr = NULL;
 uint32_t frameBufferDRCSize = 0;
-uint8_t* currTVFrameBuffer = NULL;
-uint8_t* currDRCFrameBuffer = NULL;
+uint8_t *currTVFrameBuffer = NULL;
+uint8_t *currDRCFrameBuffer = NULL;
 
 uint32_t fontColor = 0xFFFFFFFF;
 uint32_t backgroundColor = 0x0B5D5E00;
 FT_Library fontLibrary;
 FT_Face fontFace;
-uint8_t* fontBuffer;
+uint8_t *fontBuffer;
 FT_Pos cursorSpaceWidth = 0;
 
 static void FreetypeSetLine(uint32_t position, const char *line) {
@@ -45,14 +45,13 @@ static void FreetypeAddLine(const char *line) {
     }
 
     if (newLines == NUM_LINES) {
-        for (uint32_t i=0; i<NUM_LINES-1; i++) {
+        for (uint32_t i = 0; i < NUM_LINES - 1; i++) {
             memcpy(queueBuffer[i], queueBuffer[i + 1], LINE_LENGTH);
         }
 
         memcpy(queueBuffer[newLines - 1], line, length);
         queueBuffer[newLines - 1][length] = '\0';
-    }
-    else {
+    } else {
         memcpy(queueBuffer[newLines], line, length);
         queueBuffer[newLines][length] = '\0';
         newLines++;
@@ -61,22 +60,22 @@ static void FreetypeAddLine(const char *line) {
 
 void drawPixel(int32_t x, int32_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     uint8_t opacity = a;
-    uint8_t backgroundOpacity = (255-opacity);
+    uint8_t backgroundOpacity = (255 - opacity);
     {
         uint32_t width = 1280;
         uint32_t v = (x + y * width) * 4;
-        currTVFrameBuffer[v + 0] = (r * opacity + (backgroundOpacity * currTVFrameBuffer[v + 0]))/255;
-        currTVFrameBuffer[v + 1] = (g * opacity + (backgroundOpacity * currTVFrameBuffer[v + 1]))/255;
-        currTVFrameBuffer[v + 2] = (b * opacity + (backgroundOpacity * currTVFrameBuffer[v + 2]))/255;
+        currTVFrameBuffer[v + 0] = (r * opacity + (backgroundOpacity * currTVFrameBuffer[v + 0])) / 255;
+        currTVFrameBuffer[v + 1] = (g * opacity + (backgroundOpacity * currTVFrameBuffer[v + 1])) / 255;
+        currTVFrameBuffer[v + 2] = (b * opacity + (backgroundOpacity * currTVFrameBuffer[v + 2])) / 255;
         currTVFrameBuffer[v + 3] = a;
     }
 
     {
         uint32_t width = 896;
         uint32_t v = (x + y * width) * 4;
-        currDRCFrameBuffer[v + 0] = (r * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 0]))/255;
-        currDRCFrameBuffer[v + 1] = (g * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 1]))/255;
-        currDRCFrameBuffer[v + 2] = (b * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 2]))/255;
+        currDRCFrameBuffer[v + 0] = (r * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 0])) / 255;
+        currDRCFrameBuffer[v + 1] = (g * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 1])) / 255;
+        currDRCFrameBuffer[v + 2] = (b * opacity + (backgroundOpacity * currDRCFrameBuffer[v + 2])) / 255;
         currDRCFrameBuffer[v + 3] = a;
     }
 }
@@ -92,23 +91,23 @@ void drawBitmap(FT_Bitmap *bitmap, FT_Int x, FT_Int y) {
     switch (bitmap->pixel_mode) {
         case FT_PIXEL_MODE_GRAY: {
             FT_Int x_max = x + bitmap->width;
-            for (FT_Int i=x, p=0; i < x_max; i++, p++) {
-                for (FT_Int j=y, q=0; j < y_max; j++, q++) {
+            for (FT_Int i = x, p = 0; i < x_max; i++, p++) {
+                for (FT_Int j = y, q = 0; j < y_max; j++, q++) {
                     if (i < 0 || j < 0 || i >= 854 || j >= 480) continue;
 
                     uint8_t col = bitmap->buffer[q * bitmap->pitch + p];
                     if (col == 0) continue;
 
                     uint8_t pixelOpacity = col;
-                    drawPixel(i, j, r, g, b, (a+pixelOpacity)/2);
+                    drawPixel(i, j, r, g, b, (a + pixelOpacity) / 2);
                 }
             }
             break;
         }
         case FT_PIXEL_MODE_LCD: {
             FT_Int x_max = x + bitmap->width / 3;
-            for (FT_Int i=x, p=0; i < x_max; i++, p++) {
-                for (FT_Int j=y, q=0; j < y_max; j++, q++) {
+            for (FT_Int i = x, p = 0; i < x_max; i++, p++) {
+                for (FT_Int j = y, q = 0; j < y_max; j++, q++) {
                     if (i < 0 || j < 0 || i >= 854 || j >= 480)
                         continue;
                     uint8_t cr = bitmap->buffer[q * bitmap->pitch + p * 3 + 0];
@@ -141,18 +140,15 @@ int32_t renderLine(int32_t x, int32_t y, char *string, bool wrap) {
             if ((buf & 0xF0) == 0xC0) {
                 if ((b2 & 0xC0) == 0x80) b2 &= 0x3F;
                 buf = ((b1 & 0xF) << 6) | b2;
-            }
-            else if ((buf & 0xF0) == 0xD0) {
+            } else if ((buf & 0xF0) == 0xD0) {
                 if ((b2 & 0xC0) == 0x80) b2 &= 0x3F;
                 buf = 0x400 | ((b1 & 0xF) << 6) | b2;
-            }
-            else if ((buf & 0xF0) == 0xE0) {
+            } else if ((buf & 0xF0) == 0xE0) {
                 if ((b2 & 0xC0) == 0x80) b2 &= 0x3F;
                 if ((b3 & 0xC0) == 0x80) b3 &= 0x3F;
                 buf = ((b1 & 0xF) << 12) | (b2 << 6) | b3;
             }
-        }
-        else if (buf & 0x80) {
+        } else if (buf & 0x80) {
             string++;
             continue;
         }
@@ -179,8 +175,7 @@ int32_t renderLine(int32_t x, int32_t y, char *string, bool wrap) {
             if (wrap) {
                 pen_y += (fontFace->size->metrics.height >> 6);
                 pen_x = x;
-            }
-            else {
+            } else {
                 return pen_x;
             }
         }
@@ -189,8 +184,7 @@ int32_t renderLine(int32_t x, int32_t y, char *string, bool wrap) {
 
         if (x == pen_x && buf == ' ' && cursorSpaceWidth != 0) {
             pen_x += (cursorSpaceWidth >> 6);
-        }
-        else {
+        } else {
             pen_x += (slot->advance.x >> 6);
         }
         previous_glyph = glyph_index;
@@ -205,8 +199,8 @@ void WHBLogFreetypeDraw() {
     OSScreenClearBufferEx(SCREEN_DRC, backgroundColor);
     const int32_t x = 0;
 
-    for (int32_t y=0; y<NUM_LINES; y++) {
-        renderLine((x+4)*12, (y+1)*24, queueBuffer[y], false);
+    for (int32_t y = 0; y < NUM_LINES; y++) {
+        renderLine((x + 4) * 12, (y + 1) * 24, queueBuffer[y], false);
     }
 
     DCFlushRange(currTVFrameBuffer, frameBufferTVSize);
@@ -224,13 +218,13 @@ static uint32_t FreetypeProcCallbackAcquired(void *context) {
 
     MEMHeapHandle heap = MEMGetBaseHeapHandle(MEM_BASE_HEAP_MEM1);
     if (frameBufferTVSize) {
-        frameBufferTVFrontPtr = (uint8_t*)MEMAllocFromFrmHeapEx(heap, frameBufferTVSize, 0x100);
-        frameBufferTVBackPtr = (uint8_t*)frameBufferTVFrontPtr + (1*(1280*720*4));
+        frameBufferTVFrontPtr = (uint8_t *) MEMAllocFromFrmHeapEx(heap, frameBufferTVSize, 0x100);
+        frameBufferTVBackPtr = (uint8_t *) frameBufferTVFrontPtr + (1 * (1280 * 720 * 4));
     }
 
     if (frameBufferDRCSize) {
-        frameBufferDRCFrontPtr = (uint8_t*)MEMAllocFromFrmHeapEx(heap, frameBufferDRCSize, 0x100);
-        frameBufferDRCBackPtr = (uint8_t*)frameBufferDRCFrontPtr + (1*(896*480*4));
+        frameBufferDRCFrontPtr = (uint8_t *) MEMAllocFromFrmHeapEx(heap, frameBufferDRCSize, 0x100);
+        frameBufferDRCBackPtr = (uint8_t *) frameBufferDRCFrontPtr + (1 * (896 * 480 * 4));
     }
 
     OSScreenSetBufferEx(SCREEN_TV, frameBufferTVFrontPtr);
@@ -240,8 +234,8 @@ static uint32_t FreetypeProcCallbackAcquired(void *context) {
     OSScreenPutPixelEx(SCREEN_DRC, 0, 0, 0xABCDEFFF);
     DCFlushRange(frameBufferTVFrontPtr, frameBufferTVSize);
     DCFlushRange(frameBufferDRCFrontPtr, frameBufferDRCSize);
-    currTVFrameBuffer = (((uint32_t*)frameBufferTVFrontPtr)[0] == 0xABCDEFFF) ? frameBufferTVFrontPtr : frameBufferTVBackPtr;
-    currDRCFrameBuffer = (((uint32_t*)frameBufferTVFrontPtr)[0] == 0xABCDEFFF) ? frameBufferDRCFrontPtr : frameBufferDRCBackPtr;
+    currTVFrameBuffer = (((uint32_t *) frameBufferTVFrontPtr)[0] == 0xABCDEFFF) ? frameBufferTVFrontPtr : frameBufferTVBackPtr;
+    currDRCFrameBuffer = (((uint32_t *) frameBufferTVFrontPtr)[0] == 0xABCDEFFF) ? frameBufferDRCFrontPtr : frameBufferDRCBackPtr;
     return 0;
 }
 
@@ -279,7 +273,7 @@ bool WHBLogFreetypeInit() {
     }
 
     uint32_t fontSize;
-    OSGetSharedData(OS_SHAREDDATATYPE_FONT_STANDARD, 0, (void**)&fontBuffer, &fontSize);
+    OSGetSharedData(OS_SHAREDDATATYPE_FONT_STANDARD, 0, (void **) &fontBuffer, &fontSize);
 
     if ((result = FT_New_Memory_Face(fontLibrary, fontBuffer, fontSize, 0, &fontFace)) != 0) {
         return true;
@@ -341,14 +335,14 @@ void WHBLogFreetypeScreenPrintBottom(const char *line) {
     if (length > LINE_LENGTH) {
         length = LINE_LENGTH - 1;
     }
-    
-    for (uint32_t i=(NUM_LINES-1)-bottomLines+1; i<NUM_LINES; i++) {
-        memcpy(queueBuffer[i-1], queueBuffer[i], LINE_LENGTH);
+
+    for (uint32_t i = (NUM_LINES - 1) - bottomLines + 1; i < NUM_LINES; i++) {
+        memcpy(queueBuffer[i - 1], queueBuffer[i], LINE_LENGTH);
     }
 
     memcpy(queueBuffer[NUM_LINES - 1], line, length);
     queueBuffer[NUM_LINES - 1][length] = '\0';
-    if (bottomLines < NUM_LINES-1) bottomLines++;
+    if (bottomLines < NUM_LINES - 1) bottomLines++;
 }
 
 void WHBLogFreetypeScreenPrintfBottom(const char *fmt, ...) {
@@ -364,7 +358,7 @@ uint32_t WHBLogFreetypeScreenSize() {
     return NUM_LINES;
 }
 
-void WHBLogFreetypePrint(const char* line) {
+void WHBLogFreetypePrint(const char *line) {
     FreetypeAddLine(line);
 }
 

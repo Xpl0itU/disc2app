@@ -75,12 +75,12 @@ void MCPHookClose() {
     mcp_hook_fd = -1;
 }
 
-void println(int line, const char *str, ...) {
+void println(const char *str, ...) {
     char *tmp = NULL;
 
     va_list va;
     va_start(va, str);
-    if ((vasprintf(&tmp, str, va) >= 0) && (tmp != NULL))   
+    if ((vasprintf(&tmp, str, va) >= 0) && (tmp != NULL))
         WHBLogPrint(tmp);
 
     va_end(va);
@@ -169,7 +169,7 @@ static void dump() {
     WHBLogFreetypeClear();
     int line = 2;
     //will inject our custom mcp code
-    println(line++, "Doing IOSU Exploit...");
+    println("Doing IOSU Exploit...");
     *(volatile unsigned int *) 0xF5E70000 = wupserver_bin_len;
     memcpy((void *) 0xF5E70020, &wupserver_bin, wupserver_bin_len);
     DCStoreRange((void *) 0xF5E70000, wupserver_bin_len + 0x40);
@@ -182,23 +182,23 @@ static void dump() {
 
     //done with iosu exploit, take over mcp
     if (MCPHookOpen() < 0) {
-        println(line++, "MCP hook could not be opened!");
+        println("MCP hook could not be opened!");
         return;
     }
     memset((void *) 0xF5E10C00, 0, 0x20);
     DCFlushRange((void *) 0xF5E10C00, 0x20);
-    println(line++, "Done!");
+    println("Done!");
 
     //mount with full permissions
     fsaFd = IOSUHAX_FSA_Open();
     if (fsaFd < 0) {
-        println(line++, "FSA could not be opened!");
+        println("FSA could not be opened!");
         return;
     }
     fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
     fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
 
-    println(line++, "Please insert the disc you want to dump now to begin.");
+    println("Please insert the disc you want to dump now to begin.");
     //wait for disc key to be written
     while (1) {
         DCInvalidateRange((void *) 0xF5E10C00, 0x20);
@@ -247,7 +247,7 @@ static void dump() {
         sleep(1);
     }
     if (ret < 0) {
-        println(line++, "Failed to open Raw ODD!");
+        println("Failed to open Raw ODD!");
         return;
     }
 
@@ -256,12 +256,12 @@ static void dump() {
     discId[10] = '\0';
     fsa_odd_seek(0);
     if (fsa_odd_read(fsaFd, oddFd, discId, 10, 0)) {
-        println(line++, "Failed to read first disc sector!");
+        println("Failed to read first disc sector!");
         return;
     }
     char discStr[64];
     sprintf(discStr, "Inserted %s", discId);
-    println(line++, discStr);
+    println(discStr);
 
     // make install dir we will write to
     char *device = (usb == false) ? "sd:" : "usb:";
@@ -272,22 +272,21 @@ static void dump() {
 
     // Read common key
     uint8_t cKey[0x10];
-    memcpy(cKey, (void *) 0xF5E104E0, 0x10);
+    IOSUHAX_read_otp(cKey, (0x38 * 4) + 16);
 
     // Read disc key
     uint8_t discKey[0x10];
-    memcpy(discKey, (void *) 0xF5E10C00, 0x10);
+    IOSUHAX_ODM_GetDiscKey(discKey);
 
-    int apd_enabled = 0;
+    uint32_t apd_enabled = 0;
     IMIsAPDEnabled(&apd_enabled);
-    if (apd_enabled) {
+    if (apd_enabled)
         if (IMDisableAPD() == 0)
-            println(line++, "Disabled Auto Power-Down.");
-    }
+            println("Disabled Auto Power-Down.");
 
     sprintf(discStr, "Converting %s to app...", discId);
 
-    println(line++, "Reading Disc FST from WUD");
+    println("Reading Disc FST from WUD");
     //read out and decrypt partition table
     uint8_t *partTblEnc = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(0x18000);
@@ -299,7 +298,7 @@ static void dump() {
     free(partTblEnc);
 
     if (*(uint32_t *) partTbl != 0xCCA6E67B) {
-        println(line++, "Invalid FST!");
+        println("Invalid FST!");
         sleep(5);
         return;
     }
@@ -311,7 +310,7 @@ static void dump() {
     expectedHash[2] = *(uint32_t *) (partTbl + 16);
     expectedHash[3] = *(uint32_t *) (partTbl + 20);
     expectedHash[4] = *(uint32_t *) (partTbl + 24);
-    
+
     EVP_DigestInit_ex(sha1ctx, EVP_sha1(), NULL);
     EVP_DigestUpdate(sha1ctx, partTbl + 0x800, 0x7800);
     unsigned int sha1[5];
@@ -321,7 +320,7 @@ static void dump() {
     EVP_MD_CTX_free(sha1ctx);
 
     if (memcmp(sha1, expectedHash, 0x14) != 0) {
-        println(line++, "Invalid TOC SHA1!");
+        println("Invalid TOC SHA1!");
         return;
     }
 
@@ -332,14 +331,14 @@ static void dump() {
     bool certFound = false, tikFound = false, tmdFound = false;
     uint8_t tikKey[16];
 
-    println(line++, "Searching for SI Partition");
+    println("Searching for SI Partition");
     //start by getting cert, tik and tmd
     for (siPart = 0; siPart < numPartitions; siPart++) {
         if (strncasecmp(tbl[siPart].name, "SI", 3) == 0)
             break;
     }
     if (strncasecmp(tbl[siPart].name, "SI", 3) != 0) {
-        println(line++, "No SI Partition found!");
+        println("No SI Partition found!");
         return;
     }
 
@@ -347,7 +346,7 @@ static void dump() {
     uint64_t offset = ((uint64_t) tbl[siPart].offsetBE) * 0x8000;
     offset += 0x8000;
     //read out FST
-    println(line++, "Reading SI FST from WUD");
+    println("Reading SI FST from WUD");
     void *fstEnc = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(offset);
     fsa_odd_read(fsaFd, oddFd, fstEnc, 0x8000, 1);
@@ -385,10 +384,10 @@ static void dump() {
         sprintf(outF, "%s/%s", outDir, name);
         //just write the first found cert, they're all the same anyways
         if (strncasecmp(name, "title.cert", 11) == 0 && !certFound) {
-            println(line++, "Writing title.cert");
+            println("Writing title.cert");
             FILE *t = fopen(outF, "wb");
             if (t == NULL) {
-                println(line++, "Failed to create file");
+                println("Failed to create file");
                 return;
             }
             fwrite(titleDec, 1, CNTSize, t);
@@ -397,10 +396,10 @@ static void dump() {
         } else if (strncasecmp(name, "title.tik", 10) == 0 && !tikFound) {
             uint32_t tidHigh = *(uint32_t *) (titleDec + 0x1DC);
             if (tidHigh == 0x00050000) {
-                println(line++, "Writing title.tik");
+                println("Writing title.tik");
                 FILE *t = fopen(outF, "wb");
                 if (t == NULL) {
-                    println(line++, "Failed to create file");
+                    println("Failed to create file");
                     return;
                 }
                 fwrite(titleDec, 1, CNTSize, t);
@@ -418,10 +417,10 @@ static void dump() {
         } else if (strncasecmp(name, "title.tmd", 10) == 0 && !tmdFound) {
             uint32_t tidHigh = *(uint32_t *) (titleDec + 0x18C);
             if (tidHigh == 0x00050000) {
-                println(line++, "Writing title.tmd");
+                println("Writing title.tmd");
                 FILE *t = fopen(outF, "wb");
                 if (t == NULL) {
-                    println(line++, "Failed to create file");
+                    println("Failed to create file");
                     return;
                 }
                 fwrite(titleDec, 1, CNTSize, t);
@@ -437,7 +436,7 @@ static void dump() {
     free(fstDec);
 
     if (!tikFound || !tmdFound) {
-        println(line++, "tik or tmd not found!");
+        println("tik or tmd not found!");
         return;
     }
     TitleMetaData *tmd = (TitleMetaData *) tmdBuf;
@@ -446,7 +445,7 @@ static void dump() {
     uint64_t fullTid = tmd->TitleID;
     sprintf(gmChar, "GM%016" PRIx64, fullTid);
     sprintf(gmmsg, "Searching for %s Partition", gmChar);
-    println(line++, gmmsg);
+    println(gmmsg);
     uint32_t appBufLen = SECTOR_SIZE * NUM_SECTORS;
     void *appBuf = aligned_alloc(0x100, appBufLen);
     //write game .app data next
@@ -456,10 +455,10 @@ static void dump() {
             break;
     }
     if (strncasecmp(tbl[gmPart].name, gmChar, 18) != 0) {
-        println(line++, "No GM Partition found!");
+        println("No GM Partition found!");
         return;
     }
-    println(line++, "Reading GM Header from WUD");
+    println("Reading GM Header from WUD");
     offset = ((uint64_t) tbl[gmPart].offsetBE) * 0x8000;
     uint8_t *fHdr = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(offset);
@@ -468,7 +467,7 @@ static void dump() {
     uint8_t *hashPos = fHdr + 0x40 + (fHdrCnt * 4);
 
     //grab FST first
-    println(line++, "Reading GM FST from WUD");
+    println("Reading GM FST from WUD");
     uint64_t fstSize = tmd->Contents[0].Size;
     fstEnc = aligned_alloc(0x100, ALIGN_FORWARD(fstSize, 16));
     fsa_odd_seek(offset + 0x8000);
@@ -479,10 +478,10 @@ static void dump() {
     char outbuf[64];
     sprintf(outF, "%s/%08x.app", outDir, fstContentCid);
     sprintf(outbuf, "Writing %08x.app", fstContentCid);
-    println(line, outbuf);
+    println(outbuf);
     FILE *t = fopen(outF, "wb");
     if (t == NULL) {
-        println(line++, "Failed to create file");
+        println("Failed to create file");
         return;
     }
     fwrite(fstEnc, 1, ALIGN_FORWARD(fstSize, 16), t);
@@ -521,23 +520,23 @@ static void dump() {
         line = 5;
         FILE *t = fopen(outF, "wb");
         if (t == NULL) {
-            println(line++, "Failed to create file");
+            println("Failed to create file");
             return;
         }
         uint64_t total = tSize;
         while (total > 0) {
-            uint32_t toWrite = ((total > (uint64_t)appBufLen) ? (appBufLen) : (uint32_t)(total));
-			sprintf(progress,"0x%08X/0x%08X (%i% %)",(uint32_t)(tSize-total),(uint32_t)tSize,(uint32_t)((tSize-total)*100/tSize));
-			fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
-			fwrite(appBuf, 1, toWrite, t);
-			total -= toWrite;
-			WHBLogFreetypeClear();
-			printhdr_noflip();
-			WHBLogPrint(discStr);
-			WHBLogPrint(titlesmsg);
-			WHBLogPrint(outbuf);
-			WHBLogPrint(progress);
-			WHBLogFreetypeDraw();
+            uint32_t toWrite = ((total > (uint64_t) appBufLen) ? (appBufLen) : (uint32_t)(total));
+            sprintf(progress, "0x%08X/0x%08X (%i% %)", (uint32_t)(tSize - total), (uint32_t) tSize, (uint32_t)((tSize - total) * 100 / tSize));
+            fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
+            fwrite(appBuf, 1, toWrite, t);
+            total -= toWrite;
+            WHBLogFreetypeClear();
+            printhdr_noflip();
+            WHBLogPrint(discStr);
+            WHBLogPrint(titlesmsg);
+            WHBLogPrint(outbuf);
+            WHBLogPrint(progress);
+            WHBLogFreetypeDraw();
 
             if (vpad.trigger & VPAD_BUTTON_B) {
                 fclose(t);
@@ -555,10 +554,10 @@ static void dump() {
             char outbuf[64];
             sprintf(outF, "%s/%08x.h3", outDir, curContentCid);
             sprintf(outbuf, "Writing %08x.h3", curContentCid);
-            println(line++, outbuf);
+            println(outbuf);
             t = fopen(outF, "wb");
             if (t == NULL) {
-                println(line++, "Failed to create file");
+                println("Failed to create file");
                 return;
             }
             uint32_t hashNum = (uint32_t)((tSize / 0x10000000ULL) + 1);
