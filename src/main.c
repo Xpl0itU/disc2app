@@ -32,10 +32,14 @@
 #include <vpad/input.h>
 #include <whb/proc.h>
 
+#include <mocha/mocha.h>
+#include <mocha/fsa.h>
+
 #include "crypto.h"
 
+extern FSClient *__wut_devoptab_fs_client;
+
 bool usb = false;
-int fsaFd = -1;
 int oddFd = -1;
 FILE *f = NULL;
 
@@ -95,17 +99,17 @@ void println(const char *str, ...) {
 
 static uint64_t odd_offset = 0;
 
-int fsa_odd_read_sectors(int fsa_fd, int fd, void *buf, unsigned int sector, unsigned int count, int retry) {
+int fsa_odd_read_sectors(int fd, void *buf, unsigned int sector, unsigned int count, int retry) {
     int res;
     if (sector + count > MAX_SECTORS) return -1;
     do {
-        res = IOSUHAX_FSA_RawRead(fsa_fd, buf, SECTOR_SIZE, count, sector, fd);
+        res = FSAEx_RawRead(__wut_devoptab_fs_client, buf, SECTOR_SIZE, count, sector, fd);
     } while (retry && res < 0);
     // Failed to read
     return res;
 }
 
-int fsa_odd_read(int fsa_fd, int fd, char *buf, size_t len, int retry) {
+int fsa_odd_read(int fd, char *buf, size_t len, int retry) {
     if (!len) return 0;
 
     unsigned int sector = odd_offset / SECTOR_SIZE;
@@ -114,7 +118,7 @@ int fsa_odd_read(int fsa_fd, int fd, char *buf, size_t len, int retry) {
     if (unaligned_length > len) unaligned_length = len;
     if (unaligned_length) {
         char sector_buf[SECTOR_SIZE];
-        if (fsa_odd_read_sectors(fsa_fd, fd, sector_buf, sector, 1, retry) < 0) return -1;
+        if (fsa_odd_read_sectors(fd, sector_buf, sector, 1, retry) < 0) return -1;
         memcpy(buf, sector_buf + (odd_offset % SECTOR_SIZE), unaligned_length);
         odd_offset += unaligned_length;
         buf += unaligned_length;
@@ -125,7 +129,7 @@ int fsa_odd_read(int fsa_fd, int fd, char *buf, size_t len, int retry) {
     unsigned int full_sectors = len / SECTOR_SIZE;
     if (full_sectors) {
 
-        if (fsa_odd_read_sectors(fsa_fd, fd, buf, sector, full_sectors, retry) < 0) return -1;
+        if (fsa_odd_read_sectors(fd, buf, sector, full_sectors, retry) < 0) return -1;
         sector += full_sectors;
         odd_offset += full_sectors * SECTOR_SIZE;
         buf += full_sectors * SECTOR_SIZE;
@@ -134,7 +138,7 @@ int fsa_odd_read(int fsa_fd, int fd, char *buf, size_t len, int retry) {
     // Read unaligned last sector
     if (len) {
         char sector_buf[SECTOR_SIZE];
-        if (fsa_odd_read_sectors(fsa_fd, fd, sector_buf, sector, 1, retry) < 0) return -1;
+        if (fsa_odd_read_sectors(fd, sector_buf, sector, 1, retry) < 0) return -1;
         memcpy(buf, sector_buf, len);
         odd_offset += len;
     }
@@ -145,12 +149,13 @@ static void fsa_odd_seek(uint64_t offset) {
     odd_offset = offset;
 }
 
-int fsa_write(int fsa_fd, int fd, void *buf, int len) {
+int fsa_write(int fsa_fd, FILE *fd, void *buf, int len) {
     int done = 0;
     uint8_t *buf_uint8_t = (uint8_t *) buf;
     while (done < len) {
         size_t write_size = len - done;
-        int result = IOSUHAX_FSA_WriteFile(fsa_fd, buf_uint8_t + done, 0x01, write_size, fd, 0);
+        //int result = IOSUHAX_FSA_WriteFile(fsa_fd, buf_uint8_t + done, 0x01, write_size, fd, 0);
+        int result = fwrite(buf_uint8_t + done, 1, write_size, fd);
         if (result < 0)
             return result;
         else
@@ -189,12 +194,6 @@ static void dump() {
     DCFlushRange((void *) 0xF5E10C00, 0x20);
     println("Done!");
 
-    //mount with full permissions
-    fsaFd = IOSUHAX_FSA_Open();
-    if (fsaFd < 0) {
-        println("FSA could not be opened!");
-        return;
-    }
     fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
     fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
 
@@ -240,7 +239,7 @@ static void dump() {
     int retry = 10;
     ret = -1;
     while (ret < 0) {
-        ret = IOSUHAX_FSA_RawOpen(fsaFd, "/dev/odd01", &oddFd);
+        ret = FSAEx_RawOpen(__wut_devoptab_fs_client, (char*)"/dev/odd01", &oddFd);
         retry--;
         if (retry < 0)
             break;
@@ -255,7 +254,7 @@ static void dump() {
     char discId[11];
     discId[10] = '\0';
     fsa_odd_seek(0);
-    if (fsa_odd_read(fsaFd, oddFd, discId, 10, 0)) {
+    if (fsa_odd_read(oddFd, discId, 10, 0)) {
         println("Failed to read first disc sector!");
         return;
     }
@@ -290,7 +289,7 @@ static void dump() {
     //read out and decrypt partition table
     uint8_t *partTblEnc = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(0x18000);
-    fsa_odd_read(fsaFd, oddFd, partTblEnc, 0x8000, 1);
+    fsa_odd_read(oddFd, partTblEnc, 0x8000, 1);
     uint8_t iv[16];
     memset(iv, 0, 16);
     uint8_t *partTbl = aligned_alloc(0x100, 0x8000);
@@ -349,7 +348,7 @@ static void dump() {
     println("Reading SI FST from WUD");
     void *fstEnc = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(offset);
-    fsa_odd_read(fsaFd, oddFd, fstEnc, 0x8000, 1);
+    fsa_odd_read(oddFd, fstEnc, 0x8000, 1);
     void *fstDec = aligned_alloc(0x100, 0x8000);
     memset(iv, 0, 16);
     decrypt_aes(fstEnc, 0x8000, discKey, iv, fstDec);
@@ -374,7 +373,7 @@ static void dump() {
         uint64_t CNT_IV = CNTOff >> 16;
         void *titleF = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize, 16));
         fsa_odd_seek(offset + CNTOff);
-        fsa_odd_read(fsaFd, oddFd, titleF, ALIGN_FORWARD(CNTSize, 16), 1);
+        fsa_odd_read(oddFd, titleF, ALIGN_FORWARD(CNTSize, 16), 1);
         uint8_t *titleDec = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize, 16));
         memset(iv, 0, 16);
         memcpy(iv + 8, &CNT_IV, 8);
@@ -462,7 +461,7 @@ static void dump() {
     offset = ((uint64_t) tbl[gmPart].offsetBE) * 0x8000;
     uint8_t *fHdr = aligned_alloc(0x100, 0x8000);
     fsa_odd_seek(offset);
-    fsa_odd_read(fsaFd, oddFd, fHdr, 0x8000, 1);
+    fsa_odd_read(oddFd, fHdr, 0x8000, 1);
     uint32_t fHdrCnt = *(uint32_t *) (fHdr + 0x10);
     uint8_t *hashPos = fHdr + 0x40 + (fHdrCnt * 4);
 
@@ -471,7 +470,7 @@ static void dump() {
     uint64_t fstSize = tmd->Contents[0].Size;
     fstEnc = aligned_alloc(0x100, ALIGN_FORWARD(fstSize, 16));
     fsa_odd_seek(offset + 0x8000);
-    fsa_odd_read(fsaFd, oddFd, fstEnc, ALIGN_FORWARD(fstSize, 16), 1);
+    fsa_odd_read(oddFd, fstEnc, ALIGN_FORWARD(fstSize, 16), 1);
     //write FST to file
     uint32_t fstContentCid = tmd->Contents[0].ID;
     char outF[64];
@@ -527,7 +526,7 @@ static void dump() {
         while (total > 0) {
             uint32_t toWrite = ((total > (uint64_t) appBufLen) ? (appBufLen) : (uint32_t)(total));
             sprintf(progress, "0x%08X/0x%08X (%i% %)", (uint32_t)(tSize - total), (uint32_t) tSize, (uint32_t)((tSize - total) * 100 / tSize));
-            fsa_odd_read(fsaFd, oddFd, appBuf, toWrite, 1);
+            fsa_odd_read(oddFd, appBuf, toWrite, 1);
             fwrite(appBuf, 1, toWrite, t);
             total -= toWrite;
             WHBLogFreetypeClear();
@@ -587,6 +586,16 @@ int main() {
 
     // Init screen
     WHBLogFreetypeInit();
+
+    if(Mocha_InitLibrary() != MOCHA_RESULT_SUCCESS) {
+        println("Mocha_InitLibrary failed");
+        MCPHookClose();
+        WHBLogFreetypeFree();
+        WHBProcShutdown();
+        return 1;
+    }
+
+    Mocha_UnlockFSClient(__wut_devoptab_fs_client);
 
     printhdr_noflip();
     WHBLogPrint("Please make sure to take out any currently inserted disc.");
@@ -670,17 +679,16 @@ int main() {
         usleep(50000);
     }
 
-    if (fsaFd >= 0) {
-        if (f != NULL)
-            fclose(f);
-        fatUnmount("sd");
-        fatUnmount("usb");
-        if (oddFd >= 0)
-            IOSUHAX_FSA_RawClose(fsaFd, oddFd);
-        IOSUHAX_FSA_Close(fsaFd);
-    }
+    if (f != NULL)
+        fclose(f);
+    fatUnmount("sd");
+    fatUnmount("usb");
+    if (oddFd >= 0)
+        FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
+    
     //close out old mcp instance
     MCPHookClose();
+    Mocha_DeInitLibrary();
     WHBLogFreetypeFree();
     WHBProcShutdown();
     return 1;

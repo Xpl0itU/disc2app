@@ -1,18 +1,23 @@
-FROM devkitpro/devkitppc:latest
+FROM wiiuenv/devkitppc:20220605
 
 ENV openssl_ver=1.1.1o \
  PATH=$DEVKITPPC/bin:$PATH \
  WUT_ROOT=$DEVKITPRO/wut
 WORKDIR /
 
-RUN git clone https://github.com/devkitPro/wut && \
+RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
  cd wut && \
- git checkout cd6b4fb45d054d53af92bc0b3685e8bd9f01445d && \
  make -j$(nproc) && \
  make install && \
  cd .. && \
  rm -rf wut && \
- git clone --recursive https://github.com/wiiu-env/libiosuhax && \
+ git clone --recursive https://github.com/V10lator/libmocha --single-branch && \
+ cd libmocha && \
+ make -j$(nproc) && \
+ make install && \
+ cd .. && \
+ rm -rf libmocha && \
+ git clone --recursive https://github.com/Xpl0itU/libiosuhax && \
  cd libiosuhax && \
  make -j$(nproc) && \
  make install && \
