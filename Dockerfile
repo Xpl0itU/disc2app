@@ -1,6 +1,6 @@
 FROM wiiuenv/devkitppc:20220605
 
-ENV openssl_ver=1.1.1o \
+ENV openssl_ver=1.1.1q \
  PATH=$DEVKITPPC/bin:$PATH \
  WUT_ROOT=$DEVKITPRO/wut
 WORKDIR /
