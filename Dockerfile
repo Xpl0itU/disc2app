@@ -5,13 +5,13 @@ ENV openssl_ver=1.1.1o \
  WUT_ROOT=$DEVKITPRO/wut
 WORKDIR /
 
-RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
+RUN git clone --single-branch https://github.com/devkitPro/wut && \
  cd wut && \
  make -j$(nproc) && \
  make install && \
  cd .. && \
  rm -rf wut && \
- git clone --recursive https://github.com/V10lator/libmocha --single-branch && \
+ git clone --recursive https://github.com/wiiu-env/libmocha -b devoptab  && \
  cd libmocha && \
  make -j$(nproc) && \
  make install && \

@@ -37,6 +37,8 @@
 
 #include "crypto.h"
 
+#include "fatfs/extusb_devoptab/extusb_devoptab.h"
+
 extern FSClient *__wut_devoptab_fs_client;
 
 bool usb = false;
@@ -154,7 +156,6 @@ int fsa_write(int fsa_fd, FILE *fd, void *buf, int len) {
     uint8_t *buf_uint8_t = (uint8_t *) buf;
     while (done < len) {
         size_t write_size = len - done;
-        //int result = IOSUHAX_FSA_WriteFile(fsa_fd, buf_uint8_t + done, 0x01, write_size, fd, 0);
         int result = fwrite(buf_uint8_t + done, 1, write_size, fd);
         if (result < 0)
             return result;
@@ -195,7 +196,7 @@ static void dump() {
     println("Done!");
 
     fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
-    fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
+    //fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
 
     println("Please insert the disc you want to dump now to begin.");
     //wait for disc key to be written
@@ -263,19 +264,19 @@ static void dump() {
     println(discStr);
 
     // make install dir we will write to
-    char *device = (usb == false) ? "sd:" : "usb:";
+    char *device = (usb == false) ? "sd:" : "extusb:";
     sprintf(outDir, "%s/install", device);
     mkdir(outDir, 0x600);
     sprintf(outDir, "%s/install/%s", device, discId);
     mkdir(outDir, 0x600);
 
     // Read common key
-    uint8_t cKey[0x10];
-    IOSUHAX_read_otp(cKey, (0x38 * 4) + 16);
+    WiiUConsoleOTP otpBuffer;
+    Mocha_ReadOTP(&otpBuffer);
 
     // Read disc key
-    uint8_t discKey[0x10];
-    IOSUHAX_ODM_GetDiscKey(discKey);
+    WUDDiscKey discKey;
+    Mocha_ODMGetDiscKey(&discKey);
 
     uint32_t apd_enabled = 0;
     IMIsAPDEnabled(&apd_enabled);
@@ -293,7 +294,7 @@ static void dump() {
     uint8_t iv[16];
     memset(iv, 0, 16);
     uint8_t *partTbl = aligned_alloc(0x100, 0x8000);
-    decrypt_aes(partTblEnc, 0x8000, discKey, iv, partTbl);
+    decrypt_aes(partTblEnc, 0x8000, discKey.key, iv, partTbl);
     free(partTblEnc);
 
     if (*(uint32_t *) partTbl != 0xCCA6E67B) {
@@ -351,7 +352,7 @@ static void dump() {
     fsa_odd_read(oddFd, fstEnc, 0x8000, 1);
     void *fstDec = aligned_alloc(0x100, 0x8000);
     memset(iv, 0, 16);
-    decrypt_aes(fstEnc, 0x8000, discKey, iv, fstDec);
+    decrypt_aes(fstEnc, 0x8000, discKey.key, iv, fstDec);
     free(fstEnc);
     uint32_t EntryCount = (*(uint32_t *) (fstDec + 8) << 5);
     uint32_t Entries = *(uint32_t *) (fstDec + 0x20 + EntryCount + 8);
@@ -377,7 +378,7 @@ static void dump() {
         uint8_t *titleDec = aligned_alloc(0x100, ALIGN_FORWARD(CNTSize, 16));
         memset(iv, 0, 16);
         memcpy(iv + 8, &CNT_IV, 8);
-        decrypt_aes(titleF, ALIGN_FORWARD(CNTSize, 16), discKey, iv, titleDec);
+        decrypt_aes(titleF, ALIGN_FORWARD(CNTSize, 16), discKey.key, iv, titleDec);
         free(titleF);
         char outF[64];
         sprintf(outF, "%s/%s", outDir, name);
@@ -411,7 +412,7 @@ static void dump() {
                     iv[k + 8] = 0x00;
                 }
                 uint8_t *tikKeyEnc = titleDec + 0x1BF;
-                decrypt_aes(tikKeyEnc, 16, cKey, iv, tikKey);
+                decrypt_aes(tikKeyEnc, 16, otpBuffer.wiiUBank.wiiUCommonKey, iv, tikKey);
             }
         } else if (strncasecmp(name, "title.tmd", 10) == 0 && !tmdFound) {
             uint32_t tidHigh = *(uint32_t *) (titleDec + 0x18C);
@@ -589,6 +590,7 @@ int main() {
 
     if(Mocha_InitLibrary() != MOCHA_RESULT_SUCCESS) {
         println("Mocha_InitLibrary failed");
+        OSSleepTicks(OSSecondsToTicks(5));
         MCPHookClose();
         WHBLogFreetypeFree();
         WHBProcShutdown();
@@ -596,6 +598,19 @@ int main() {
     }
 
     Mocha_UnlockFSClient(__wut_devoptab_fs_client);
+
+    println("Initializing devoptab...");
+    FRESULT fr = init_extusb_devoptab();
+    println("Initializing devoptab done");
+    if (fr != FR_OK) {
+        println("Initializing devoptab failed!");
+        OSSleepTicks(OSSecondsToTicks(5));
+        MCPHookClose();
+        Mocha_DeinitLibrary();
+        WHBLogFreetypeFree();
+        WHBProcShutdown();
+        return 1;
+    }
 
     printhdr_noflip();
     WHBLogPrint("Please make sure to take out any currently inserted disc.");
@@ -682,13 +697,14 @@ int main() {
     if (f != NULL)
         fclose(f);
     fatUnmount("sd");
-    fatUnmount("usb");
+    fini_extusb_devoptab();
+    //fatUnmount("usb");
     if (oddFd >= 0)
         FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
     
     //close out old mcp instance
     MCPHookClose();
-    Mocha_DeInitLibrary();
+    Mocha_DeinitLibrary();
     WHBLogFreetypeFree();
     WHBProcShutdown();
     return 1;

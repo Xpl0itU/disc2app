@@ -22,9 +22,9 @@ include $(DEVKITPRO)/wut/share/wut_rules
 #-------------------------------------------------------------------------------
 TARGET		:=	disc2app
 BUILD		:=	build
-SOURCES		:=	src
+SOURCES		:=	src src/fatfs src/fatfs/extusb_devoptab
 DATA		:=  
-INCLUDES	:=  src include payload
+INCLUDES	:=  src src/fatfs include payload
 DEFS        :=  
 #-------------------------------------------------------------------------------
 # options for code generation
