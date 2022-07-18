@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <whb/log.h>
+#include <whb/log_console.h>
 #include "../devices.h"
 #include "extusb_devoptab.h"
 
@@ -10,7 +12,7 @@ extern "C" {
 #endif
 
 static devoptab_t
-        __extusb_fs_devoptab =
+        extusb_fs_devoptab =
         {
                 .name         = "extusb",
                 .structSize   = sizeof(__extusb_fs_file_t),
@@ -40,65 +42,126 @@ static devoptab_t
                 .rmdir_r      = __extusb_fs_rmdir,
         };
 
-static BOOL __extusb_fs_initialised = FALSE;
+static BOOL extusb_fs_initialised = false;
 
-FRESULT init_extusb_devoptab() {
-    FRESULT fr = FR_OK;
-
-    if (__extusb_fs_initialised) {
-        return fr;
+int init_extusb_devoptab() {
+    if (extusb_fs_initialised) {
+        return 0;
     }
 
-    __extusb_fs_devoptab.deviceData = memalign(0x20, sizeof(FATFS));
+    WHBLogPrintf("Allocating devoptab");
+    WHBLogConsoleDraw();
+    extusb_fs_devoptab.deviceData = memalign(0x40, sizeof(FATFS));
+    if (extusb_fs_devoptab.deviceData == NULL) {
+        return -1;
+    }
+
     char mountPath[0x80];
     sprintf(mountPath, "%d:", DEV_USB_EXT);
 
-    int dev = AddDevice(&__extusb_fs_devoptab);
+    WHBLogPrintf("Adding device");
+    WHBLogConsoleDraw();
+    int dev = AddDevice(&extusb_fs_devoptab);
     if (dev != -1) {
+        WHBLogPrintf("Setting default device");
+        WHBLogConsoleDraw();
         setDefaultDevice(dev);
-        __extusb_fs_initialised = TRUE;
 
+        WHBLogPrintf("Mounting USB drive");
+        WHBLogConsoleDraw();
         // Mount the external USB drive
-        fr = f_mount(__extusb_fs_devoptab.deviceData, mountPath, 1);
+        FRESULT fr = f_mount(extusb_fs_devoptab.deviceData, mountPath, 1);
 
         if (fr != FR_OK) {
-            free(__extusb_fs_devoptab.deviceData);
-            __extusb_fs_devoptab.deviceData = NULL;
+            WHBLogPrintf("Mounting external drive failed: %s", translate_fatfs_error(fr));
+            WHBLogConsoleDraw();
+            free(extusb_fs_devoptab.deviceData);
+            extusb_fs_devoptab.deviceData = NULL;
             return fr;
         }
-        char workDir[0x83];
+        WHBLogPrintf("Changing directory");
+        WHBLogConsoleDraw();
         // chdir to external USB root for general use
-        strcpy(workDir, __extusb_fs_devoptab.name);
-        strcat(workDir, "/");
-        chdir(workDir);
+        chdir("extusb:/");
+        extusb_fs_initialised = true;
     } else {
         f_unmount(mountPath);
-        free(__extusb_fs_devoptab.deviceData);
-        __extusb_fs_devoptab.deviceData = NULL;
+        free(extusb_fs_devoptab.deviceData);
+        extusb_fs_devoptab.deviceData = NULL;
         return dev;
     }
 
-    return fr;
+    return 0;
 }
 
-FRESULT
-fini_extusb_devoptab() {
-    FRESULT fr = FR_OK;
-
-    if (!__extusb_fs_initialised) {
-        return fr;
+int fini_extusb_devoptab() {
+    if (!extusb_fs_initialised) {
+        return 0;
     }
 
-    RemoveDevice(__extusb_fs_devoptab.name);
+    int rc = RemoveDevice(extusb_fs_devoptab.name);
+    if (rc < 0) {
+        return rc;
+    }
 
     char mountPath[0x80];
     sprintf(mountPath, "%d:", DEV_USB_EXT);
-    f_unmount(mountPath);
-    free(__extusb_fs_devoptab.deviceData);
-    __extusb_fs_devoptab.deviceData = NULL;
-    __extusb_fs_initialised = FALSE;
+    rc = f_unmount(mountPath);
+    if (rc != FR_OK) {
+        return rc;
+    }
+    free(extusb_fs_devoptab.deviceData);
+    extusb_fs_devoptab.deviceData = NULL;
+    extusb_fs_initialised = false;
 
-    return fr;
+    return rc;
+}
+
+const char *translate_fatfs_error(FRESULT fr) {
+    switch (fr) {
+        case FR_OK:
+            return "(0) OK";
+        case FR_DISK_ERR:
+            return "(1) A hard error occurred in the low level disk I/O layer";
+        case FR_INT_ERR:
+            return "(2) Assertion failed";
+        case FR_NOT_READY:
+            return "(3) The physical drive cannot work";
+        case FR_NO_FILE:
+            return "(4) Could not find the file";
+        case FR_NO_PATH:
+            return "(5) Could not find the path";
+        case FR_INVALID_NAME:
+            return "(6) The path name format is invalid";
+        case FR_DENIED:
+            return "(7) Access denied due to prohibited access or directory full";
+        case FR_EXIST:
+            return "(8) Access denied due to prohibited access";
+        case FR_INVALID_OBJECT:
+            return "(9) The file/directory object is invalid";
+        case FR_WRITE_PROTECTED:
+            return "(10) The physical drive is write protected";
+        case FR_INVALID_DRIVE:
+            return "(11) The logical drive number is invalid";
+        case FR_NOT_ENABLED:
+            return "(12) The volume has no work area";
+        case FR_NO_FILESYSTEM:
+            return "(13) There is no valid FAT volume";
+        case FR_MKFS_ABORTED:
+            return "(14) The f_mkfs() aborted due to any problem";
+        case FR_TIMEOUT:
+            return "(15) Could not get a grant to access the volume within defined period";
+        case FR_LOCKED:
+            return "(16) The operation is rejected according to the file sharing policy";
+        case FR_NOT_ENOUGH_CORE:
+            return "(17) LFN working buffer could not be allocated";
+        case FR_TOO_MANY_OPEN_FILES:
+            return "(18) Number of open files > FF_FS_LOCK";
+        case FR_INVALID_PARAMETER:
+            return "(19) Given parameter is invalid";
+        default:
+            return "Unknown error";
+    }
 }
 
 #ifdef __cplusplus

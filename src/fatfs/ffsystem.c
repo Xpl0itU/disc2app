@@ -57,7 +57,7 @@ int ff_cre_syncobj (	/* 1:Function succeeded, 0:Could not create the sync object
 )
 {
     // mutex is 44 bytes
-    FF_SYNC_t mutex = memalign(0x40, sizeof(FF_SYNC_t));
+    FF_SYNC_t mutex = memalign(0x40, sizeof(OSMutex));
     if (mutex == NULL) return 0;
     OSInitMutex(mutex);
     *sobj = mutex;

@@ -21,6 +21,10 @@ __extusb_fs_dirnext(struct _reent *r,
         r->_errno = __extusb_fs_translate_error(fr);
         return -1;
     }
+    if (dir->entry_data.fname[0] == 0) {
+        r->_errno = ENOENT;
+        return -1;
+    }
 
     // Fill in the stat info
     memset(filestat, 0, sizeof(struct stat));

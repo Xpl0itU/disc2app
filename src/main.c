@@ -38,6 +38,7 @@
 #include "crypto.h"
 
 #include "fatfs/extusb_devoptab/extusb_devoptab.h"
+#include "ios_fs.h"
 
 extern FSClient *__wut_devoptab_fs_client;
 
@@ -195,7 +196,7 @@ static void dump() {
     DCFlushRange((void *) 0xF5E10C00, 0x20);
     println("Done!");
 
-    fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
+    if(!usb) fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
     //fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
 
     println("Please insert the disc you want to dump now to begin.");
@@ -240,7 +241,14 @@ static void dump() {
     int retry = 10;
     ret = -1;
     while (ret < 0) {
+        println("1");
         ret = FSAEx_RawOpen(__wut_devoptab_fs_client, (char*)"/dev/odd01", &oddFd);
+        println("2");
+        if (ret < 0) {
+            println("3");
+            FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
+            println("4");
+        }
         retry--;
         if (retry < 0)
             break;
@@ -597,7 +605,7 @@ int main() {
         return 1;
     }
 
-    Mocha_UnlockFSClient(__wut_devoptab_fs_client);
+    initFs();
 
     println("Initializing devoptab...");
     FRESULT fr = init_extusb_devoptab();
@@ -696,8 +704,9 @@ int main() {
 
     if (f != NULL)
         fclose(f);
-    fatUnmount("sd");
+    //fatUnmount("sd");
     fini_extusb_devoptab();
+    cleanupFs();
     //fatUnmount("usb");
     if (oddFd >= 0)
         FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);

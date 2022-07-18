@@ -5,12 +5,6 @@
 extern "C" {
 #endif
 
-static inline FSMode
-__extusb_fs_convert_mode(mode_t mode) {
-    // Convert normal Unix octal permission bits into CafeOS hexadecimal permission bits
-    return (FSMode) (((mode & S_IRWXU) << 2) | ((mode & S_IRWXG) << 1) | (mode & S_IRWXO));
-}
-
 int
 __extusb_fs_chmod(struct _reent *r,
                   const char *path,

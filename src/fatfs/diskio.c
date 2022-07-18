@@ -3,7 +3,7 @@
 /*-----------------------------------------------------------------------*/
 /* If a working storage control module is available, it should be        */
 /* attached to the FatFs via a glue function rather than modifying it.   */
-/* This is an example of glue functions to attach various exsisting      */
+/* This is an example of glue functions to attach various existing       */
 /* storage control modules to the FatFs module with a defined API.       */
 /*-----------------------------------------------------------------------*/
 
@@ -12,13 +12,35 @@
 #include <mocha/fsa.h>
 #include <coreinit/filesystem.h>
 #include <coreinit/time.h>
+#include <whb/log_console.h>
+#include <whb/log.h>
 #include "../ios_fs.h"
 #include "devices.h"
 
-
-static int deviceFds[] = {-1, -1};
-static const char *devicePaths[] = {SD_PATH, USB_EXT_PATH};
 static FSClient *fsClient;
+static uint8_t staticBuf[512];
+
+
+static DSTATUS tryMountingFatDrive(int pdrv, const char *path) {
+    int fd = -1;
+    int res = FSAEx_RawOpen(fsClient, path, &fd);
+    if (res < 0 || fd < 0) return STA_NODISK;
+
+    res = FSAEx_RawRead(fsClient, staticBuf, 512, 1, 0, fd);
+    if (res < 0 || fd < 0) {
+        goto unmount;
+    }
+
+    if (staticBuf[0x1FE] == 0x55 && (staticBuf[0x1FF] == 0xAA || staticBuf[0x1FF] == 0xAB)) {
+        deviceFds[pdrv] = fd;
+        devicePaths[pdrv] = path;
+        return 0;
+    }
+
+    unmount:
+    FSAEx_RawClose(fsClient, fd);
+    return STA_NOINIT;
+}
 
 
 /*-----------------------------------------------------------------------*/
@@ -44,17 +66,23 @@ DSTATUS disk_status(
 DSTATUS disk_initialize(
         BYTE pdrv                /* Physical drive number to identify the drive */
 ) {
-    if (pdrv < 0 || pdrv >= FF_VOLUMES) return STA_NOINIT;
     fsClient = initFs();
     if (fsClient == NULL) {
         return STA_NOINIT;
     }
 
-    int res = FSAEx_RawOpen(fsClient, devicePaths[pdrv], &deviceFds[pdrv]);
-    if (res < 0) return STA_NOINIT;
-    if (deviceFds[pdrv] < 0) return STA_NOINIT;
+    DSTATUS success;
 
-    return 0;
+    switch (pdrv) {
+        case DEV_SD:
+            return tryMountingFatDrive(pdrv, SD_PATH);
+        case DEV_USB_EXT:
+            success = tryMountingFatDrive(pdrv, USB_EXT1_PATH);
+            if (success == 0) return success;
+            return tryMountingFatDrive(pdrv, USB_EXT2_PATH);
+        default:
+            return STA_NODISK;
+    }
 }
 
 
@@ -64,7 +92,7 @@ DSTATUS disk_initialize(
 /*-----------------------------------------------------------------------*/
 
 DRESULT disk_read(
-        BYTE pdrv,        /* Physical drive nmuber to identify the drive */
+        BYTE pdrv,        /* Physical drive number to identify the drive */
         BYTE *buff,        /* Data buffer to store read data */
         LBA_t sector,    /* Start sector in LBA */
         UINT count        /* Number of sectors to read */
@@ -74,6 +102,11 @@ DRESULT disk_read(
     if (deviceFds[pdrv] < 0) return RES_NOTRDY;
     int res = FSAEx_RawRead(fsClient, buff, 512, count, sector, deviceFds[pdrv]);
     if (res < 0) return RES_ERROR;
+
+    // Make stealthed drives accessible
+    if (sector == 0 && buff[0x1FF] == 0xAB) {
+        buff[0x1FF] = 0xAA;
+    }
 
     return RES_OK;
 }

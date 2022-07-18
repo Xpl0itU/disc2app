@@ -22,27 +22,18 @@ __extusb_fs_fixpath(struct _reent *r,
         p = (char *) path;
     }
 
-    if (strlen(p) > PATH_MAX) {
+    if (strlen(p) > FS_MAX_PATH) {
         r->_errno = ENAMETOOLONG;
         return NULL;
     }
 
-    int driveNum = -1;
-    size_t deviceNameLen = ((uintptr_t) path - (uintptr_t) p);
-    if (strlen(DEV_USB_EXT_NAME) == deviceNameLen && strncmp(DEV_USB_EXT_NAME, path, deviceNameLen)) {
-        driveNum = DEV_USB_EXT;
-    } else {
-        r->_errno = ENOENT;
-        return NULL;
-    }
-
-    fixedPath = memalign(0x40, PATH_MAX + 1);
+    fixedPath = (char *) memalign(0x40, FS_MAX_PATH + 1);
     if (!fixedPath) {
         r->_errno = ENOMEM;
         return NULL;
     }
 
-    sprintf(fixedPath, "%d:%s", driveNum, p);
+    sprintf(fixedPath, "%d:%s", DEV_USB_EXT, p);
     return fixedPath;
 }
 

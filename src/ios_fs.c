@@ -7,11 +7,13 @@
 #include <whb/log.h>
 #include <whb/log_console.h>
 #include <mocha/mocha.h>
+#include <sys/unistd.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+extern FSClient *__wut_devoptab_fs_client;
 static FSClient fsClient;
 static bool initialized = false;
 
@@ -20,11 +22,8 @@ FSClient *initFs() {
         return &fsClient;
     }
 
-    WHBLogPrint("FSInit()");
-    WHBLogConsoleDraw();
     FSInit();
-    WHBLogPrint("FSAddClient()");
-    WHBLogConsoleDraw();
+    FSAInit();
     if (FSAddClient(&fsClient, FS_ERROR_FLAG_ALL) != FS_STATUS_OK) {
         WHBLogPrint("FSAddClient failed! Press any key to exit");
         WHBLogConsoleDraw();
@@ -38,14 +37,20 @@ FSClient *initFs() {
         WHBLogConsoleDraw();
         return NULL;
     }
+    returncode = Mocha_UnlockFSClient(__wut_devoptab_fs_client);
+    if (returncode < 0) {
+        WHBLogPrintf("UnlockFSClient failed %d! Press any key to exit", returncode);
+        WHBLogConsoleDraw();
+        return NULL;
+    }
 
     initialized = true;
     return &fsClient;
 }
 
+
 int cleanupFs() {
     FSDelClient(&fsClient, FS_ERROR_FLAG_ALL);
-    initialized = false;
     return 0;
 }
 
@@ -94,7 +99,7 @@ FSError FSA_IoctlvEx(int clientHandle, uint32_t request, uint32_t vectorCountIn,
 }
 
 
-int FSAEx_FlushVolume(FSClient *client, const char *volume_path) {
+FSError FSAEx_FlushVolume(FSClient *client, const char *volume_path) {
     /*
         if (!outHandle) {
         return FS_ERROR_INVALID_BUFFER;
@@ -133,7 +138,7 @@ int FSAEx_FlushVolume(FSClient *client, const char *volume_path) {
     shim->ipcReqType = FSA_IPC_REQUEST_IOCTL;
     shim->response.word0 = 0xFFFFFFFF;
 
-    int ret = __FSAShimSend(shim, 0);
+    FSError ret = __FSAShimSend(shim, 0);
     free(shim);
     return ret;
 }
@@ -142,7 +147,7 @@ int FSAEx_FlushVolume(FSClient *client, const char *volume_path) {
 // type 4 :
 // 		0x08 : device size in sectors (u64)
 // 		0x10 : device sector size (u32)
-int FSAEx_GetDeviceInfo(FSClient *client, const char *device_path, int type, void *out_data) {
+FSError FSAEx_GetDeviceInfo(FSClient *client, const char *device_path, int type, void *out_data) {
     if (!device_path) return FS_ERROR_INVALID_PATH;
     if (!out_data) return FS_ERROR_INVALID_BUFFER;
 
@@ -157,16 +162,6 @@ int FSAEx_GetDeviceInfo(FSClient *client, const char *device_path, int type, voi
     char *buf = (char*) &shim->request.rawOpen;
     strncpy(buf, device_path, 0x27F);
     *(int32_t*) &buf[0x280] = type;
-/*
-    uint8_t *iobuf = alloc_iobuf();
-    uint32_t *in_buf  = (uint32_t *) iobuf;
-    uint32_t *out_buf = (uint32_t *) &iobuf[0x520];
-
-    strncpy((char *) &in_buf[0x01], device_path, 0x27F);
-    in_buf[0x284 / 4] = type;
-
-    int ret = FSA_Ioctl(client, 0x18, in_buf, 0x520, out_buf, 0x293);
-*/
     int size = 0;
 
     switch (type) {
@@ -193,17 +188,68 @@ int FSAEx_GetDeviceInfo(FSClient *client, const char *device_path, int type, voi
             break;
     }
 
-    /*
-    memcpy(out_data, &out_buf[1], size);
-
-    free(iobuf);
-    return ret;
-    */
     memcpy(out_data, (uint8_t*)&shim->response.rawOpen, size);
 
-    int ret = __FSAShimSend(shim, 0);
+    FSError ret = __FSAShimSend(shim, 0);
     free(shim);
     return ret;
+}
+
+
+FSError FSAEx_Mount(FSClient *client, const char *source, const char *target, FSAMountFlags flags, void *arg_buf, uint32_t arg_len) {
+    int clientHandle = FSGetClientBody(client)->clientHandle;
+
+    FSAShimBuffer *buffer = (FSAShimBuffer *) memalign(0x40, sizeof(FSAShimBuffer));
+    if (!buffer) {
+        return FS_ERROR_INVALID_BUFFER;
+    }
+
+    /*
+    // Check if source and target path is valid.
+    if (!std::string_view(target).starts_with("/vol/") || !std::string_view(source).starts_with("/dev/")) {
+        return FS_ERROR_INVALID_PATH;
+    }
+
+    if (flags == FSA_MOUNT_FLAG_BIND_MOUNT || flags == FSA_MOUNT_FLAG_GLOBAL_MOUNT) {
+        // Return error if target path DOES NOT start with "/vol/storage_"
+        if (!std::string_view(target).starts_with("/vol/storage_")) {
+            return FS_ERROR_INVALID_PATH;
+        }
+    } else {
+        // Return error if target path starts with "/vol/storage_"
+        if (std::string_view(target).starts_with("/vol/storage_")) {
+            return FS_ERROR_INVALID_PATH;
+        }
+    }
+    */
+
+    FSError res = __FSAShimSetupRequestMount(buffer, clientHandle, source, target, 2, arg_buf, arg_len);
+    if (res != 0) {
+        free(buffer);
+        return res;
+    }
+    res = __FSAShimSend(buffer, 0);
+    free(buffer);
+    return res;
+}
+
+
+FSError FSAEx_Unmount(FSClient *client, const char *mountedTarget, FSAUnmountFlags flags) {
+    int clientHandle = FSGetClientBody(client)->clientHandle;
+
+    FSAShimBuffer *buffer = (FSAShimBuffer *) memalign(0x40, sizeof(FSAShimBuffer));
+    if (!buffer) {
+        return FS_ERROR_INVALID_BUFFER;
+    }
+
+    FSError res = __FSAShimSetupRequestUnmount(buffer, clientHandle, mountedTarget, flags);
+    if (res != 0) {
+        free(buffer);
+        return res;
+    }
+    res = __FSAShimSend(buffer, 0);
+    free(buffer);
+    return res;
 }
 
 
