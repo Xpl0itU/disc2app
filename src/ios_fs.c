@@ -25,22 +25,14 @@ FSClient *initFs() {
     FSInit();
     FSAInit();
     if (FSAddClient(&fsClient, FS_ERROR_FLAG_ALL) != FS_STATUS_OK) {
-        WHBLogPrint("FSAddClient failed! Press any key to exit");
-        WHBLogConsoleDraw();
         return NULL;
     }
-    WHBLogPrint("Mocha_UnlockFSClient()");
-    WHBLogConsoleDraw();
     int returncode = Mocha_UnlockFSClient(&fsClient);
     if (returncode < 0) {
-        WHBLogPrintf("UnlockFSClient failed %d! Press any key to exit", returncode);
-        WHBLogConsoleDraw();
         return NULL;
     }
     returncode = Mocha_UnlockFSClient(__wut_devoptab_fs_client);
     if (returncode < 0) {
-        WHBLogPrintf("UnlockFSClient failed %d! Press any key to exit", returncode);
-        WHBLogConsoleDraw();
         return NULL;
     }
 
@@ -65,16 +57,7 @@ FSError FSA_Ioctl(FSClient *client, int ioctl, void *in_buf, uint32_t in_len, vo
 }
 
 FSError FSA_IoctlEx(int clientHandle, int ioctl, void *in_buf, uint32_t in_len, void *out_buf, uint32_t out_len) {
-    WHBLogPrintf("ioctl %d", ioctl);
-    WHBLogPrintf("clientHandle %d", clientHandle);
-    WHBLogPrintf("in_buf %p", in_buf);
-    WHBLogPrintf("in_len %u", in_len);
-    WHBLogPrintf("out_buf %p", out_buf);
-    WHBLogPrintf("out_len %u", out_len);
-    WHBLogConsoleDraw();
     int ret = IOS_Ioctl(clientHandle, ioctl, in_buf, in_len, out_buf, out_len);
-    WHBLogPrintf("ret %d", ret);
-    WHBLogConsoleDraw();
     return (FSError) ret;
 }
 
@@ -90,11 +73,7 @@ FSError FSA_Ioctlv(FSClient *client, uint32_t request, uint32_t vectorCountIn, u
 
 
 FSError FSA_IoctlvEx(int clientHandle, uint32_t request, uint32_t vectorCountIn, uint32_t vectorCountOut, IOSVec *vector) {
-    WHBLogPrintf("ioctlv %d", request);
-    WHBLogConsoleDraw();
     int ret = IOS_Ioctlv(clientHandle, request, vectorCountIn, vectorCountOut, vector);
-    WHBLogPrintf("ret %d", ret);
-    WHBLogConsoleDraw();
     return (FSError) ret;
 }
 
