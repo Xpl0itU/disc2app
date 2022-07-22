@@ -40,6 +40,8 @@ void WHBLogFreetypeSetFontColor(uint32_t color);
 void WHBLogFreetypeSetBackgroundColor(uint32_t color);
 bool WHBLogFreetypeSetFontSize(uint8_t width, uint8_t height);
 
+void println(const char *str, ...);
+
 #ifdef __cplusplus
 }
 #endif

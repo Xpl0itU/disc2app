@@ -32,6 +32,8 @@
 #include <vpad/input.h>
 #include <whb/proc.h>
 
+#include <cinttypes>
+
 #include <mocha/mocha.h>
 #include <mocha/fsa.h>
 
@@ -46,7 +48,7 @@ bool usb = false;
 int oddFd = -1;
 FILE *f = NULL;
 
-int vpadError = -1;
+VPADReadError vpadError = -1;
 VPADStatus vpad;
 KPADStatus kpad;
 
@@ -66,7 +68,7 @@ int MCPHookOpen() {
     IOS_IoctlAsync(mcp_hook_fd, 0x62, (void *) 0, 0, (void *) 0, 0, (void *) someFunc, (void *) 0);
     //let wupserver start up
     sleep(1);
-    if (IOSUHAX_Open("/dev/mcp") < 0)
+    if (IOSUHAX_Open(nullptr) < 0)
         return -1;
     return 0;
 }
@@ -80,20 +82,6 @@ void MCPHookClose() {
     sleep(1);
     MCP_Close(mcp_hook_fd);
     mcp_hook_fd = -1;
-}
-
-void println(const char *str, ...) {
-    char *tmp = NULL;
-
-    va_list va;
-    va_start(va, str);
-    if ((vasprintf(&tmp, str, va) >= 0) && (tmp != NULL))
-        WHBLogPrint(tmp);
-
-    va_end(va);
-    if (tmp != NULL)
-        free(tmp);
-    WHBLogFreetypeDraw();
 }
 
 #define SECTOR_SIZE 2048
@@ -180,7 +168,9 @@ static void dump() {
     *(volatile unsigned int *) 0xF5E70000 = wupserver_bin_len;
     memcpy((void *) 0xF5E70020, &wupserver_bin, wupserver_bin_len);
     DCStoreRange((void *) 0xF5E70000, wupserver_bin_len + 0x40);
+    /*
     IOSUExploit();
+    */
     int ret;
     char outDir[64];
     OpenSSL_add_all_algorithms();
@@ -201,6 +191,7 @@ static void dump() {
 
     println("Please insert the disc you want to dump now to begin.");
     //wait for disc key to be written
+    /*
     while (1) {
         DCInvalidateRange((void *) 0xF5E10C00, 0x20);
         if (*(volatile unsigned int *) 0xF5E10C00 != 0)
@@ -235,7 +226,7 @@ static void dump() {
             }
         }
         usleep(50000);
-    }
+    }*/
 
     //opening raw odd might take a bit
     int retry = 10;
@@ -245,9 +236,7 @@ static void dump() {
         ret = FSAEx_RawOpen(__wut_devoptab_fs_client, (char*)"/dev/odd01", &oddFd);
         println("2");
         if (ret < 0) {
-            println("3");
             FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
-            println("4");
         }
         retry--;
         if (retry < 0)
@@ -273,8 +262,10 @@ static void dump() {
 
     // make install dir we will write to
     char *device = (usb == false) ? "sd:" : "extusb:";
+    println("Creating folder");
     sprintf(outDir, "%s/install", device);
     mkdir(outDir, 0x600);
+    println("folder created");
     sprintf(outDir, "%s/install/%s", device, discId);
     mkdir(outDir, 0x600);
 
@@ -324,7 +315,7 @@ static void dump() {
     unsigned int sha1[5];
     unsigned int sha1size;
 
-    EVP_DigestFinal_ex(sha1ctx, sha1, &sha1size);
+    EVP_DigestFinal_ex(sha1ctx, (unsigned char*)sha1, &sha1size);
     EVP_MD_CTX_free(sha1ctx);
 
     if (memcmp(sha1, expectedHash, 0x14) != 0) {
@@ -396,6 +387,7 @@ static void dump() {
             FILE *t = fopen(outF, "wb");
             if (t == NULL) {
                 println("Failed to create file");
+                sleep(5);
                 return;
             }
             fwrite(titleDec, 1, CNTSize, t);
@@ -490,6 +482,7 @@ static void dump() {
     FILE *t = fopen(outF, "wb");
     if (t == NULL) {
         println("Failed to create file");
+        sleep(5);
         return;
     }
     fwrite(fstEnc, 1, ALIGN_FORWARD(fstSize, 16), t);
@@ -529,6 +522,7 @@ static void dump() {
         FILE *t = fopen(outF, "wb");
         if (t == NULL) {
             println("Failed to create file");
+            sleep(5);
             return;
         }
         uint64_t total = tSize;
@@ -606,6 +600,7 @@ int main() {
     }
 
     initFs();
+    Mocha_UnlockFSClient(__wut_devoptab_fs_client);
 
     println("Initializing devoptab...");
     FRESULT fr = init_extusb_devoptab();
@@ -651,7 +646,7 @@ int main() {
         }
 
         for (int i = 0; i < 4; i++) {
-            uint32_t controllerType;
+            WPADExtensionType controllerType;
             // check if the controller is connected
             if (WPADProbe(i, &controllerType) != 0)
                 continue;

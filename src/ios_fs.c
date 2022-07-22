@@ -223,7 +223,7 @@ FSError FSAEx_Mount(FSClient *client, const char *source, const char *target, FS
     }
     */
 
-    FSError res = __FSAShimSetupRequestMount(buffer, clientHandle, source, target, 2, arg_buf, arg_len);
+    FSError res = __FSAShimSetupRequestMount(buffer, clientHandle, source, target, flags, arg_buf, arg_len);
     if (res != 0) {
         free(buffer);
         return res;

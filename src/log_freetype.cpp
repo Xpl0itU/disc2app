@@ -390,3 +390,17 @@ void WHBLogFreetypeFree() {
         FreetypeProcCallbackReleased(NULL);
     }
 }
+
+void println(const char *str, ...) {
+    char *tmp = NULL;
+
+    va_list va;
+    va_start(va, str);
+    if ((vasprintf(&tmp, str, va) >= 0) && (tmp != NULL))
+        WHBLogPrint(tmp);
+
+    va_end(va);
+    if (tmp != NULL)
+        free(tmp);
+    WHBLogFreetypeDraw();
+}
