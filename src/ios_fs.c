@@ -27,6 +27,8 @@ FSClient *initFs() {
     if (FSAddClient(&fsClient, FS_ERROR_FLAG_ALL) != FS_STATUS_OK) {
         return NULL;
     }
+    WHBLogPrint("Mocha_UnlockFSClient()");
+    WHBLogConsoleDraw();
     int returncode = Mocha_UnlockFSClient(&fsClient);
     if (returncode < 0) {
         return NULL;
