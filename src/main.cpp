@@ -18,8 +18,6 @@
 #include <coreinit/mcp.h>
 #include <coreinit/screen.h>
 #include <coreinit/thread.h>
-#include <fat.h>
-#include <iosuhax.h>
 #include <malloc.h>
 #include <padscore/kpad.h>
 #include <stdarg.h>
@@ -53,36 +51,6 @@ VPADStatus vpad;
 KPADStatus kpad;
 
 #define ALIGN_FORWARD(x, alignment) (((x) + ((alignment) -1)) & (~((alignment) -1)))
-
-//just to be able to call async
-void someFunc(void *arg) {
-    (void) arg;
-}
-
-static int mcp_hook_fd = -1;
-int MCPHookOpen() {
-    //take over mcp thread
-    mcp_hook_fd = MCP_Open();
-    if (mcp_hook_fd < 0)
-        return -1;
-    IOS_IoctlAsync(mcp_hook_fd, 0x62, (void *) 0, 0, (void *) 0, 0, (void *) someFunc, (void *) 0);
-    //let wupserver start up
-    sleep(1);
-    if (IOSUHAX_Open(nullptr) < 0)
-        return -1;
-    return 0;
-}
-
-void MCPHookClose() {
-    if (mcp_hook_fd < 0)
-        return;
-    //close down wupserver, return control to mcp
-    IOSUHAX_Close();
-    //wait for mcp to return
-    sleep(1);
-    MCP_Close(mcp_hook_fd);
-    mcp_hook_fd = -1;
-}
 
 #define SECTOR_SIZE 2048
 #define NUM_SECTORS 1024
@@ -163,78 +131,17 @@ void printhdr_noflip() {
 static void dump() {
     WHBLogFreetypeClear();
     int line = 2;
-    //will inject our custom mcp code
-    println("Doing IOSU Exploit...");
-    *(volatile unsigned int *) 0xF5E70000 = wupserver_bin_len;
-    memcpy((void *) 0xF5E70020, &wupserver_bin, wupserver_bin_len);
-    DCStoreRange((void *) 0xF5E70000, wupserver_bin_len + 0x40);
-    /*
-    IOSUExploit();
-    */
     int ret;
     char outDir[64];
     OpenSSL_add_all_algorithms();
     ERR_load_crypto_strings();
     EVP_MD_CTX *sha1ctx = EVP_MD_CTX_new();
 
-    //done with iosu exploit, take over mcp
-    if (MCPHookOpen() < 0) {
-        println("MCP hook could not be opened!");
-        return;
-    }
-    memset((void *) 0xF5E10C00, 0, 0x20);
-    DCFlushRange((void *) 0xF5E10C00, 0x20);
-    println("Done!");
-
-    if(!usb) fatMountSimple("sd", &IOSUHAX_sdio_disc_interface);
-    //fatMountSimple("usb", &IOSUHAX_usb_disc_interface);
-
-    println("Please insert the disc you want to dump now to begin.");
-    //wait for disc key to be written
-    /*
-    while (1) {
-        DCInvalidateRange((void *) 0xF5E10C00, 0x20);
-        if (*(volatile unsigned int *) 0xF5E10C00 != 0)
-            break;
-        VPADRead(0, &vpad, 1, &vpadError);
-        if (vpadError == 0) {
-            if (vpad.trigger & VPAD_BUTTON_HOME)
-                return;
-        }
-
-        for (int i = 0; i < 4; i++) {
-            uint32_t controllerType;
-            // check if the controller is connected
-            if (WPADProbe(i, &controllerType) != 0)
-                continue;
-
-            KPADRead(i, &kpad, 1);
-
-            switch (controllerType) {
-                case WPAD_EXT_CORE:
-                    if (kpad.trigger & WPAD_BUTTON_HOME)
-                        return;
-                    break;
-                case WPAD_EXT_CLASSIC:
-                    if (kpad.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
-                        return;
-                    break;
-                case WPAD_EXT_PRO_CONTROLLER:
-                    if (kpad.pro.trigger & WPAD_PRO_BUTTON_HOME)
-                        return;
-                    break;
-            }
-        }
-        usleep(50000);
-    }*/
-
     //opening raw odd might take a bit
     int retry = 10;
     ret = -1;
     while (ret < 0) {
-        println("1");
         ret = FSAEx_RawOpen(__wut_devoptab_fs_client, (char*)"/dev/odd01", &oddFd);
-        println("2");
         if (ret < 0) {
             FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
         }
@@ -262,10 +169,8 @@ static void dump() {
 
     // make install dir we will write to
     char *device = (usb == false) ? "sd:" : "extusb:";
-    println("Creating folder");
     sprintf(outDir, "%s/install", device);
     mkdir(outDir, 0x600);
-    println("folder created");
     sprintf(outDir, "%s/install/%s", device, discId);
     mkdir(outDir, 0x600);
 
@@ -586,7 +491,6 @@ int main() {
     if(Mocha_InitLibrary() != MOCHA_RESULT_SUCCESS) {
         println("Mocha_InitLibrary failed");
         OSSleepTicks(OSSecondsToTicks(5));
-        MCPHookClose();
         WHBLogFreetypeFree();
         WHBProcShutdown();
         return 1;
@@ -601,7 +505,6 @@ int main() {
     if (fr != FR_OK) {
         println("Initializing devoptab failed!");
         OSSleepTicks(OSSecondsToTicks(5));
-        MCPHookClose();
         Mocha_DeinitLibrary();
         WHBLogFreetypeFree();
         WHBProcShutdown();
@@ -692,15 +595,11 @@ int main() {
 
     if (f != NULL)
         fclose(f);
-    //fatUnmount("sd");
     fini_extusb_devoptab();
     cleanupFs();
-    //fatUnmount("usb");
     if (oddFd >= 0)
         FSAEx_RawClose(__wut_devoptab_fs_client, oddFd);
     
-    //close out old mcp instance
-    MCPHookClose();
     Mocha_DeinitLibrary();
     WHBLogFreetypeFree();
     WHBProcShutdown();
