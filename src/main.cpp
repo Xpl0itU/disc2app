@@ -539,13 +539,6 @@ static void dump() {
             WHBLogPrint(outbuf);
             WHBLogPrint(progress);
             WHBLogFreetypeDraw();
-
-            if (vpad.trigger & VPAD_BUTTON_B) {
-                fclose(t);
-                free(fstDec);
-                free(appBuf);
-                return;
-            }
         }
         line = 6;
         fclose(t);
